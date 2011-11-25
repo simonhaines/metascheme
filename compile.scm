@@ -40,7 +40,7 @@
 ;; vectors (which are also used as conscells)
 ;; functions (fixed and arbitrary number of arguments)
 ;;
-;; All objects are represented with a 32 bit uint, with 2 bits reserved 
+;; All objects are represented with a 32 bit i32, with 2 bits reserved 
 ;; for a type tag.
 ;;
 ;; -- The Implementation --
@@ -176,6 +176,9 @@
 (define (make-reg)
   (set! var-counter (+ 1 var-counter))
   (list 'reg (c "%r" (number->string var-counter))))
+(define (make-global)
+  (set! var-counter (+ 1 var-counter))
+  (list 'global (c "@g" (number->string var-counter))))
 
 (define (stack-reg? exp) (or (tagged-list? exp 'stack-reg) (tagged-list? exp 'stack-reg-not-used)))
 (define (stack-reg-used? exp) (tagged-list? exp 'stack-reg))
@@ -208,14 +211,14 @@
 (define (add-llvm-function f-name f-params f-body f-target)
   (define (build-params params)
     (if (null? params) ""
-        (c "uint* " (llvm-repr (car params))
+        (c "i32* " (llvm-repr (car params))
            (if (null? (cdr params)) "" ", ")
            (build-params (cdr params)))))
   (set! llvm-function-list
 	(append 
          llvm-function-list
          (list (append-code 
-                (c "uint " (llvm-repr f-name) "(" (build-params f-params) ") {")
+                (c "i32 " (llvm-repr f-name) "(" (build-params f-params) ") {")
                 f-body
                 (llvm-ret f-target)
                 (c "}"))))))
@@ -237,10 +240,10 @@
 
 (define llvm-string-list '())
 (define (add-llvm-string target str)
-  (let ((str-type (c "[" (number->string (+ (string-length str) 1)) " x sbyte]")))
+  (let ((str-type (c "[" (number->string (+ (string-length str) 1)) " x i8]")))
     (set! llvm-string-list 
-          (cons (c (llvm-repr target) " = internal constant " str-type 
-                      " c\"" (fix-string-format str) "\\00\"")
+          (cons (c (llvm-repr target) " = private unnamed_addr constant "
+                   str-type " c\"" (fix-string-format str) "\\00\"")
                 llvm-string-list))
     (c str-type "*")))
 
@@ -268,12 +271,17 @@
     (add . "add") (sub . "sub") (mul . "mul") (div . "div") (rem . "rem")    
     ;; binary bit operations.
     (bit-and . "and") (bit-or . "or") (bit-xor . "xor") 
-    (bit-shl . "shl") (bit-shr . "shr")
+    (bit-shl . "shl") (bit-lshr . "lshr") (bit-ashr . "ashr")
     ;; boolean operations.
-    (seteq . "seteq") (setne . "setne") (setlt . "setlt") (setgt . "setgt")
-    (setle . "setle") (setge . "setge")))
+    (cmp-eq . "icmp eq") (cmp-ne . "icmp ne")
+    (cmp-ult . "icmp ult") (cmp-ugt . "icmp ugt")
+    (cmp-slt . "icmp slt") (cmp-sgt . "icmp sgt")
+    (cmp-ule . "icmp ule") (cmp-uge . "icmp uge")
+    (cmp-sle . "icmp sle") (cmp-sge . "icmp sge")))
 
-(define llvm-boolean-instructions '(seteq setne setlt setgt setle setge))
+(define llvm-boolean-instructions
+  '(cmp-eq cmp-ne cmp-ult cmp-ugt cmp-slt cmp-sgt cmp-ule
+    cmp-ule cmp-sle cmp-sge))
 (define llvm-shift-instructions '(bit-shl bit-shr))
 (define (llvm-instr-name op) (cdr (assoc op llvm-instructions)))
 
@@ -283,17 +291,17 @@
         ((list? exp) (cadr exp))
         (else exp)))
 
-(define (llvm-load target var) (lc target " = load uint* " (llvm-repr var)))
-(define (llvm-store target value) (lc "store uint " value ", uint* " (llvm-repr target)))
-(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca uint"))
+(define (llvm-load target var) (lc target " = load i32* " (llvm-repr var)))
+(define (llvm-store target value) (lc "store i32 " value ", i32* " (llvm-repr target)))
+(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca i32"))
 
 (define (llvm-init-stack-reg reg)
   (let ((t1 (make-reg)))
     (set-stack-reg-used! reg)
     (append-code
      (llvm-alloca-var reg)
-     (llvm-cast t1 "uint*" (llvm-repr reg) "sbyte**")
-     (c "call void %llvm.gcroot(sbyte** " (llvm-repr t1) ", sbyte* null)"))))
+     (llvm-cast t1 "i32*" (llvm-repr reg) "i8**")
+     (c "call void %llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)"))))
 
 (define (lc2 instruction)  
  (define (llvm-loader code load-code res-instruction)
@@ -325,10 +333,10 @@
 (define (lc . instruction) (lc2 instruction))
 
 (define (llvm-instruction target op x y)
-  (lc target " = " (llvm-instr-name op) " uint " (llvm-repr x) ", " (llvm-repr y)))
+  (lc target " = " (llvm-instr-name op) " i32 " (llvm-repr x) ", " (llvm-repr y)))
 
 (define (llvm-id target exp) ; Identity function
-  (lc target " = add uint 0, " exp))
+  (lc target " = add i32 0, " exp))
 
 (define (llvm-call2 target function args)
   (define (arg-repr exp)
@@ -339,14 +347,14 @@
     (cond ((null? arg-list) '())
           (else
            (cons (if (= fi 1) "" ", ")
-                 (cons "uint*" 
+                 (cons "i32*" 
                        (cons (arg-repr (car arg-list))
                              (build-arg-list (cdr arg-list) 0)))))))
   (lc2 
-   (append (list target " = call uint " (llvm-repr function) "(") (build-arg-list args 1) (list ")"))))
+   (append (list target " = call i32 " (llvm-repr function) "(") (build-arg-list args 1) (list ")"))))
 (define (llvm-call target function . args) (llvm-call2 target function args))
 
-(define (llvm-ret value) (lc "ret uint " value))
+(define (llvm-ret value) (lc "ret i32 " value))
 (define (llvm-cast target type1 x type2) (lc target " = cast " type1 " " x " to " type2))
 
 (define (llvm-label label) (c label ":"))
@@ -356,14 +364,14 @@
         (t2 (make-reg)))
     (append-code
      (llvm-call t1 'raw-number pred) ; false iff pred = 0 or '()
-     (llvm-cast t2 "uint" t1 "bool")
+     (llvm-cast t2 "i32" t1 "bool")
      (lc "br bool " t2 ", label %" c-label ", label %" a-label))))
 
 (define (llvm-shift-op target op value sh)
   (let ((t1 (make-reg)))
     (append-code 
-     (llvm-cast t1 "uint" sh "ubyte")
-     (lc target " = " (llvm-instr-name op) " uint " value ", ubyte " t1))))
+     (llvm-cast t1 "i32" sh "i8")
+     (lc target " = " (llvm-instr-name op) " i32 " value ", i8 " t1))))
 
 ;; Compiler
 
@@ -388,14 +396,15 @@
   (cond ((number? exp) 
          (llvm-id target exp)) ;; create tagged integer
         ((or (string? exp) (symbol? exp))
-         (let ((str (make-reg))
+         (let ((str (make-global))
                (t1 (make-reg))
                (str-repr (if (string? exp) exp (symbol->string exp))))
            (append-code
-            (llvm-cast t1 (add-llvm-string str str-repr) str "uint")
-            (lc target " = call uint \"%make-string/symbol\"(uint " (llvm-repr t1) 
-                ", uint* " (convert-to-stack-reg (string-length str-repr)) 
-                ", uint* " (convert-to-stack-reg (if (symbol? exp) 1 0)) ")"))))
+            (llvm-cast t1 (add-llvm-string str str-repr) str "i32")
+            (lc target
+                " = call i32 \"@make-string-or-symbol\"(i32 " (llvm-repr t1) 
+                ", i32* " (convert-to-stack-reg (string-length str-repr)) 
+                ", i32* " (convert-to-stack-reg (if (symbol? exp) 1 0)) ")"))))
         ((null? exp) (llvm-call target 'make-null))
         ((pair? exp)
          (let ((t1 (make-stack-reg))
@@ -481,7 +490,7 @@
      (compile-sequence (lambda-body exp) l-target
                        (extend-c-t-env (lambda-parameters exp) c-t-env)) l-target)
     (append-code
-     (lc target " = call uint \"%make-procedure\"(uint (uint*)* " f-name ", uint* " 'env ", uint* "
+     (lc target " = call i32 @make-procedure(i32 (i32*)* " f-name ", i32* " 'env ", i32* "
          (convert-to-stack-reg
           (if (lambda-arbitrary-args? exp)
               (length (lambda-parameters exp))
@@ -506,17 +515,17 @@
     (append-code
      (compile (first-arg exp) x c-t-env)
      (compile (second-arg exp) y c-t-env)
-     (lc rx " = shr uint " x ", ubyte 2") ; raw-number
-     (lc ry " = shr uint " y ", ubyte 2")
+     (lc rx " = lshr i32 " x ", 2") ; raw-number
+     (lc ry " = lshr i32 " y ", 2")
      (cond ((member (operator exp) llvm-shift-instructions)
             (llvm-shift-op target2 (operator exp) rx ry))
            ((member (operator exp) llvm-boolean-instructions) ;; FIXME: what if we compare two pointers?
             (let ((t1 (make-reg)))
               (append-code (llvm-instruction t1 (operator exp) rx ry)
-                           (llvm-cast target2 "bool" t1 "uint"))))
+                           (llvm-cast target2 "bool" t1 "i32"))))
            (else ;; binary operation
             (llvm-instruction target2 (operator exp) rx ry)))
-     (lc target " = call uint \"%make-number\"(uint " target2 ")"))))
+     (lc target " = call i32 @make-number(i32 " target2 ")"))))
      
 
 (define (compile-application exp target c-t-env)
@@ -558,286 +567,285 @@
      (llvm-call2 target (operator exp) t-vars))))
 
 (define bootstrap-llvm-code
-"implementation
-declare int %printf(sbyte*, ...)
-declare int %exit(int)
-declare int %getchar()
-declare void %llvm.memcpy(sbyte*, sbyte*, uint, uint)
+";implementation
+declare i32 @printf(i8*, ...)
+declare i32 @exit(i32)
+declare i32 @getchar()
+declare void @llvm.memcpy(i8*, i8*, i32, i32)
 
-declare sbyte* %llvm_gc_allocate(uint)
-declare void %llvm_gc_initialize(uint)
+declare i8* @llvm_gc_allocate(i32)
+declare void @llvm_gc_initialize(i32)
 
-declare void %llvm.gcroot(sbyte**, sbyte*)
-declare void %llvm.gcwrite(sbyte*, sbyte*, sbyte**)
+declare void @llvm.gcroot(i8**, i8*)
+declare void @llvm.gcwrite(i8*, i8*, i8**)
 
 ;; Support functions
 
-uint \"%allocate-bytearray\"(uint* %size) {
-  %size1 = call uint \"%raw-number\"(uint* %size)
-  %res = malloc sbyte, uint %size1
-  %res1 = cast sbyte* %res to uint
-  ret uint %res1
+define i32 @allocate-bytearray(i32* %size) {
+  %size1 = call i32 @raw-number(i32* %size)
+  %res = malloc i8, i32 %size1
+  %res1 = ptrtoint i8* %res to i32
+  ret i32 %res1
 }
 
-uint \"%bytearray-ref\"(sbyte* %arr, uint %index) {
-  %ptr = getelementptr sbyte* %arr, uint %index
-  %res = load sbyte* %ptr
-  %res2 = cast sbyte %res to uint
-  %res3 = call uint \"%make-number\"(uint %res2)
-  ret uint %res3
+define i32 @bytearray-ref(i8* %arr, i32 %index) {
+  %ptr = getelementptr i8* %arr, i32 %index
+  %res = load i8* %ptr
+  %res2 = zext i8 %res to i32
+  %res3 = call i32 @make-number(i32 %res2)
+  ret i32 %res3
 }
 
-void \"%bytearray-set!\"(sbyte* %arr, uint %index, uint %value) {
- %ptr = getelementptr sbyte* %arr, uint %index
- %value.1 = cast uint %value to sbyte
- store sbyte %value.1, sbyte* %ptr
+define void @bytearray-set(i8* %arr, i32 %index, i32 %value) {
+ %ptr = getelementptr i8* %arr, i32 %index
+ %value.1 = trunc i32 %value to i8
+ store i8 %value.1, i8* %ptr
  ret void
 }
 
-uint \"%make-procedure\"(uint (uint*)* %raw-func, uint* %env, uint* %nparams) {
- %obj = call sbyte* %llvm_gc_allocate(uint 16)
- %obj.1 = cast sbyte* %obj to uint*
- store uint 38, uint* %obj.1 ; size 4, tag 3, forward bit = 0
+define i32 @make-procedure(i32 (i32*)* %raw-func, i32* %env, i32* %nparams) {
+ %obj = call i8* @llvm_gc_allocate(i32 16)
+ %obj.1 = bitcast i8* %obj to i32*
+ store i32 38, i32* %obj.1 ; size 4, tag 3, forward bit = 0
 
- %ptr.1 = getelementptr uint* %obj.1, uint 1
- %raw-func.1 = cast uint (uint*)* %raw-func to uint
- store uint %raw-func.1, uint* %ptr.1
+ %ptr.1 = getelementptr i32* %obj.1, i32 1
+ %raw-func.1 = ptrtoint i32 (i32*)* %raw-func to i32
+ store i32 %raw-func.1, i32* %ptr.1
 
- %ptr.2 = getelementptr uint* %obj.1, uint 2
- %env.1 = load uint* %env
- store uint %env.1, uint* %ptr.2
+ %ptr.2 = getelementptr i32* %obj.1, i32 2
+ %env.1 = load i32* %env
+ store i32 %env.1, i32* %ptr.2
 
- %ptr.3 = getelementptr uint* %obj.1, uint 3
- %nparams.1 = load uint* %nparams
- store uint %nparams.1, uint* %ptr.3
+ %ptr.3 = getelementptr i32* %obj.1, i32 3
+ %nparams.1 = load i32* %nparams
+ store i32 %nparams.1, i32* %ptr.3
 
- %res = cast sbyte* %obj to uint
- %res.1 = or uint %res, 3 ; tag 3, procedure. 
- ret uint %res.1
+ %res = ptrtoint i8* %obj to i32
+ %res.1 = or i32 %res, 3 ; tag 3, procedure. 
+ ret i32 %res.1
 }
 
-uint \"%make-string/symbol\"(uint %raw-str, uint* %size, uint* %symbolp) {
- %obj = call sbyte* %llvm_gc_allocate(uint 16)
- %obj.1 = cast sbyte* %obj to uint*
- store uint 36, uint* %obj.1 ; size 4, tag 2, forward bit = 0
+define i32 @make-string-or-symbol(i32 %raw-str, i32* %size, i32* %symbolp) {
+ %obj = call i8* @llvm_gc_allocate(i32 16)
+ %obj.1 = bitcast i8* %obj to i32*
+ store i32 36, i32* %obj.1 ; size 4, tag 2, forward bit = 0
 
- %ptr.1 = getelementptr uint* %obj.1, uint 1
- store uint %raw-str, uint* %ptr.1
+ %ptr.1 = getelementptr i32* %obj.1, i32 1
+ store i32 %raw-str, i32* %ptr.1
 
- %ptr.2 = getelementptr uint* %obj.1, uint 2
- %size.1 = load uint* %size
- store uint %size.1, uint* %ptr.2
+ %ptr.2 = getelementptr i32* %obj.1, i32 2
+ %size.1 = load i32* %size
+ store i32 %size.1, i32* %ptr.2
 
- %ptr.3 = getelementptr uint* %obj.1, uint 3
- %symbolp.1 = load uint* %symbolp
- store uint %symbolp.1, uint* %ptr.3
+ %ptr.3 = getelementptr i32* %obj.1, i32 3
+ %symbolp.1 = load i32* %symbolp
+ store i32 %symbolp.1, i32* %ptr.3
 
- %res = cast sbyte* %obj to uint
- %res.1 = or uint %res, 2 ; tag 2, string/symbol. 
- ret uint %res.1
+ %res = ptrtoint i8* %obj to i32
+ %res.1 = or i32 %res, 2 ; tag 2, string/symbol. 
+ ret i32 %res.1
 }
 
-sbyte* \"%string-bytes\"(uint* %str) {
- %str.1 = call uint* \"%points-to\"(uint* %str)
- %str.2 = getelementptr uint* %str.1, uint 1
- %bytes = load uint* %str.2
- %bytes.2 = cast uint %bytes to sbyte*
- ret sbyte* %bytes.2
+define i8* @string-bytes(i32* %str) {
+ %str.1 = call i32* @points-to(i32* %str)
+ %str.2 = getelementptr i32* %str.1, i32 1
+ %bytes = load i32* %str.2
+ %bytes.2 = inttoptr i32 %bytes to i8*
+ ret i8* %bytes.2
 }
 
-uint \"%clear-tag\"(uint* %x) {
- %x.1 = load uint* %x
- %x.2 = shr uint %x.1, ubyte 2
- %x.3 = shl uint %x.2, ubyte 2
- ret uint %x.3
+define i32 @clear-tag(i32* %x) {
+ %x.1 = load i32* %x
+ %x.2 = lshr i32 %x.1, 2
+ %x.3 = shl i32 %x.2, 2
+ ret i32 %x.3
 }
  
-uint \"%make-number\"(uint %val) {
- %res = shl uint %val, ubyte 2
- ret uint %res
+define i32 @make-number(i32 %val) {
+ %res = shl i32 %val, 2
+ ret i32 %res
 }
 
-uint \"%raw-number\"(uint* %x) {
- %raw = load uint* %x
- %raw.1 = shr uint %raw, ubyte 2
- ret uint %raw.1
+define i32 @raw-number(i32* %x) {
+ %raw = load i32* %x
+ %raw.1 = lshr i32 %raw, 2
+ ret i32 %raw.1
 }
 
-uint* \"%points-to\"(uint* %x) {
- %x.1 = load uint* %x
- %x.2 = shr uint %x.1, ubyte 2
- %x.3 = shl uint %x.2, ubyte 2
- %ptr.1 = cast uint %x.3 to uint*
- ret uint* %ptr.1
+define i32* @points-to(i32* %x) {
+ %x.1 = load i32* %x
+ %x.2 = lshr i32 %x.1, 2
+ %x.3 = shl i32 %x.2, 2
+ %ptr.1 = inttoptr i32 %x.3 to i32*
+ ret i32* %ptr.1
 }
 
-uint \"%tag-eq?\"(uint* %x, uint %tag) {
- %x.1 = load uint* %x
- %tag.1 = and uint %x.1, 3
- %bool = seteq uint %tag.1, %tag
+define i32 @tag-eq(i32* %x, i32 %tag) {
+ %x.1 = load i32* %x
+ %tag.1 = and i32 %x.1, 3
+ %bool = icmp eq i32 %tag.1, %tag
  br bool %bool, label %eq, label %noteq
 eq:
- ret uint 4 ; number 1
+ ret i32 4 ; number 1
 noteq:
- ret uint 0 ; number 0
+ ret i32 0 ; number 0
 }
 
 ;; Primitive scheme functions
 
-uint \"%llvm-read-char\"() {
-  %res = call int %getchar()
-  %res.1 = cast int %res to uint
-  %res.2 = call uint \"%make-number\"(uint %res.1)
-  ret uint %res.2
+define i32 @llvm-read-char() {
+  %res = call i32 %getchar()
+  %res.1 = call i32 @make-number(i32 %res)
+  ret i32 %res.1
 }
 
-uint \"%print-number\"(uint* %format, uint* %value) {
-  %format.2 = call sbyte* \"%string-bytes\"(uint* %format)
-  %number = call uint \"%raw-number\"(uint* %value) 
-  call int (sbyte*, ...)* %printf(sbyte* %format.2, uint %number)
-  ret uint 0
+define i32 @print-number(i32* %format, i32* %value) {
+  %format.2 = call i8* @string-bytes(i32* %format)
+  %number = call i32 @raw-number(i32* %value) 
+  call int (i8*, ...)* @printf(i8* %format.2, i32 %number)
+  ret i32 0
 }
 
-uint \"%print-string/symbol\"(uint* %str) {
-  %str.2 = call sbyte* \"%string-bytes\"(uint* %str)
-  call int (sbyte*, ...)* %printf(sbyte* %str.2)
-  ret uint 0
+define i32 @print-string/symbol(i32* %str) {
+  %str.2 = call i8* @string-bytes(i32* %str)
+  call int (i8*, ...)* %printf(i8* %str.2)
+  ret i32 0
 }
 
-uint \"%allocate-object\"(uint* %size, uint* %tag) {
- %size.1 = load uint* %size        ; loading number gives size * 4.
- %alloc_size = add uint %size.1, 4 ; header.
- %obj = call sbyte* %llvm_gc_allocate(uint %alloc_size)
- %obj.1 = cast sbyte* %obj to uint*
- %tag.1 = call uint \"%raw-number\"(uint* %tag)
- %objtag.1 = or uint %size.1, %tag.1
- %objtag.2 = shl uint %objtag.1, ubyte 1 ; forwarding/mark bit
- store uint %objtag.2, uint* %obj.1
- %res = cast sbyte* %obj to uint
- %res.1 = or uint %res, %tag.1     ; type tag.
- ret uint %res.1
+define i32 @allocate-object(i32* %size, i32* %tag) {
+ %size.1 = load i32* %size        ; loading number gives size * 4.
+ %alloc_size = add i32 %size.1, 4 ; header.
+ %obj = call i8* @llvm_gc_allocate(i32 %alloc_size)
+ %obj.1 = bitcast i8* %obj to i32*
+ %tag.1 = call i32 @raw-number(i32* %tag)
+ %objtag.1 = or i32 %size.1, %tag.1
+ %objtag.2 = shl i32 %objtag.1, 1 ; forwarding/mark bit
+ store i32 %objtag.2, i32* %obj.1
+ %res = ptrtoint i8* %obj to i32
+ %res.1 = or i32 %res, %tag.1     ; type tag.
+ ret i32 %res.1
 }
 
-uint \"%object-size\"(uint* %x) {
- %ptr = call uint* \"%points-to\"(uint* %x)
- %size = load uint* %ptr
- %size.1 = shr uint %size, ubyte 3
- %size.2 = shl uint %size.1, ubyte 2
- ret uint %size.2
+define i32 @object-size(i32* %x) {
+ %ptr = call i32* @points-to(i32* %x)
+ %size = load i32* %ptr
+ %size.1 = lshr i32 %size, 3
+ %size.2 = shl i32 %size.1, 2
+ ret i32 %size.2
 }
 
-uint \"%object-ref\"(uint* %obj, uint* %index) {
- %ptr = call uint* \"%points-to\"(uint* %obj)
- %index = call uint \"%raw-number\"(uint* %index)
- %index.1 = add uint %index, 1
- %ptr.1 = getelementptr uint* %ptr, uint %index.1
- %ref = load uint* %ptr.1 ;; gcread
- ret uint %ref
+define i32 @object-ref(i32* %obj, i32* %index) {
+ %ptr = call i32* @points-to(i32* %obj)
+ %index = call i32 @raw-number(i32* %index)
+ %index.1 = add i32 %index, 1
+ %ptr.1 = getelementptr i32* %ptr, i32 %index.1
+ %ref = load i32* %ptr.1 ;; gcread
+ ret i32 %ref
 }
 
-uint \"%object-set!\"(uint* %obj, uint* %index, uint* %value) {
- %ptr = call uint* \"%points-to\"(uint* %obj)
- %index = call uint \"%raw-number\"(uint* %index)
- %index.1 = add uint %index, 1
- %ptr.1 = getelementptr uint* %ptr, uint %index.1
- %val = load uint* %value ;; gcread
- store uint %val, uint* %ptr.1 ;; gcwrite
- %res = load uint* %obj
- ret uint %res
+define i32 @object-set!(i32* %obj, i32* %index, i32* %value) {
+ %ptr = call i32* @points-to(i32* %obj)
+ %index = call i32 @raw-number(i32* %index)
+ %index.1 = add i32 %index, 1
+ %ptr.1 = getelementptr i32* %ptr, i32 %index.1
+ %val = load i32* %value ;; gcread
+ store i32 %val, i32* %ptr.1 ;; gcwrite
+ %res = load i32* %obj
+ ret i32 %res
 }
 
-uint \"%allocate-string/symbol\"(uint* %size, uint* %symbolp) {
-  %bytes = call uint \"%allocate-bytearray\"(uint *%size)
-  %res = call uint \"%make-string/symbol\"(uint %bytes, uint* %size, uint* %symbolp)
-  ret uint %res
+define i32 @allocate-string/symbol(i32* %size, i32* %symbolp) {
+  %bytes = call i32 @allocate-bytearray(i32 *%size)
+  %res = call i32 @make-string-or-symbol(i32 %bytes, i32* %size, i32* %symbolp)
+  ret i32 %res
 }
 
-uint \"%string-ref\"(uint* %str, uint* %index) {
- %bytes = call sbyte* \"%string-bytes\"(uint* %str)
- %index.1 = call uint \"%raw-number\"(uint* %index)
- %res = call uint \"%bytearray-ref\"(sbyte* %bytes, uint %index.1)
- ret uint %res
+define i32 @string-ref(i32* %str, i32* %index) {
+ %bytes = call i8* @string-bytes(i32* %str)
+ %index.1 = call i32 @raw-number(i32* %index)
+ %res = call i32 @bytearray-ref(i8* %bytes, i32 %index.1)
+ ret i32 %res
 }
 
-uint \"%string-set!\"(uint* %str, uint* %index, uint* %value) {
- %bytes = call sbyte* \"%string-bytes\"(uint* %str)
- %index.1 = call uint \"%raw-number\"(uint* %index)
- %value.1 = call uint \"%raw-number\"(uint* %value)
- call void \"%bytearray-set!\"(sbyte* %bytes, uint %index.1, uint %value.1)
- %res = load uint* %str
- ret uint %res
+define i32 @string-set!(i32* %str, i32* %index, i32* %value) {
+ %bytes = call i8* @string-bytes(i32* %str)
+ %index.1 = call i32 @raw-number(i32* %index)
+ %value.1 = call i32 @raw-number(i32* %value)
+ call void @bytearray-set(i8* %bytes, i32 %index.1, i32 %value.1)
+ %res = load i32* %str
+ ret i32 %res
 }
 
-uint \"%mem-cpy\"(uint* %src, uint* %dst, uint* %size) {
- %src.1 = call uint* \"%points-to\"(uint* %src)
- %src.2 = cast uint* %src.1 to sbyte*
- %dst.1 = call uint* \"%points-to\"(uint* %dst)
- %dst.2 = cast uint* %dst.1 to sbyte*
- %size.2 = call uint \"%raw-number\"(uint* %size)
- call void %llvm.memcpy(sbyte* %dst.2, sbyte* %src.2, uint %size.2, uint 0)
- %res = load uint* %dst
- ret uint %res
+define i32 @mem-cpy(i32* %src, i32* %dst, i32* %size) {
+ %src.1 = call i32* @points-to(i32* %src)
+ %src.2 = bitcast i32* %src.1 to i8*
+ %dst.1 = call i32* @points-to(i32* %dst)
+ %dst.2 = bitcast i32* %dst.1 to i8*
+ %size.2 = call i32 @raw-number(i32* %size)
+ call void @llvm.memcpy(i8* %dst.2, i8* %src.2, i32 %size.2, i32 0)
+ %res = load i32* %dst
+ ret i32 %res
 }
 
-uint \"%apply-procedure\"(uint* %proc, uint* %callenv) {
- %proc.1 = call uint* \"%points-to\"(uint* %proc)
- %ptr.1 = getelementptr uint* %proc.1, uint 1
- %raw-func = load uint* %ptr.1
- %raw-func.1 = cast uint %raw-func to uint (uint*)*
- %res = call uint %raw-func.1(uint* %callenv)
- ret uint %res
+define i32 @apply-procedure(i32* %proc, i32* %callenv) {
+ %proc.1 = call i32* @points-to(i32* %proc)
+ %ptr.1 = getelementptr i32* %proc.1, i32 1
+ %raw-func = load i32* %ptr.1
+ %raw-func.1 = inttoptr i32 %raw-func to i32 (i32*)*
+ %res = call i32 %raw-func.1(i32* %callenv)
+ ret i32 %res
 }
 
-uint \"%number?\"(uint* %x) {
- %res = call uint \"%tag-eq?\"(uint* %x, uint 0)
- ret uint %res
+define i32 @number?(i32* %x) {
+ %res = call i32 @tag-eq?(i32* %x, i32 0)
+ ret i32 %res
 }
 
-uint \"%vector?\"(uint* %x) {
- %res = call uint \"%tag-eq?\"(uint* %x, uint 1)
- ret uint %res
+define i32 @vector?(i32* %x) {
+ %res = call i32 @tag-eq?(i32* %x, i32 1)
+ ret i32 %res
 }
 
-uint \"%string/symbol?\"(uint* %x) {
- %res = call uint \"%tag-eq?\"(uint* %x, uint 2);
- ret uint %res
+define i32 @string/symbol?(i32* %x) {
+ %res = call i32 @tag-eq?(i32* %x, i32 2);
+ ret i32 %res
 }
 
-uint \"%procedure?\"(uint* %x) {
- %res = call uint \"%tag-eq?\"(uint* %x, uint 3)
- ret uint %res
+define i32 @procedure?(i32* %x) {
+ %res = call i32 @tag-eq?(i32* %x, i32 3)
+ ret i32 %res
 }
 
-uint \"%null?\"(uint* %x) {
- %x.1 = load uint* %x
- %bool = seteq uint %x.1, 1 ; null vector pointer?
+define i32 @null?(i32* %x) {
+ %x.1 = load i32* %x
+ %bool = icmp eq i32 %x.1, 1 ; null vector pointer?
  br bool %bool, label %eq, label %noteq
 eq:
- ret uint 4 ; number 1
+ ret i32 4 ; number 1
 noteq:
- ret uint 0 ; number 0
+ ret i32 0 ; number 0
 }
 
-uint \"%make-null\"() {
- ret uint 1
+define i32 @make-null() {
+ ret i32 1
 }
 
-uint \"%make-true\"() {
- ret uint 4
+define i32 @make-true() {
+ ret i32 4
 }
 
-uint \"%exit\"() {
-  call int(int)* %exit(int 0)
-  ret uint 0
+define i32 @exit() {
+  call int(int)* @exit(int 0)
+  ret i32 0
 }
 
-uint %main(int %argc, sbyte** %argv) {
-  call void %llvm_gc_initialize(uint 2000000)
+define i32 @main(int %argc, i8** %argv) {
+  call void @llvm_gc_initialize(i32 2000000)
 
-  %env = alloca uint
-  store uint 0, uint* %env
-  %res = call uint %startup(uint* %env)
-  ret uint %res
+  %env = alloca i32
+  store i32 0, i32* %env
+  %res = call i32 %startup(i32* %env)
+  ret i32 %res
 }
 
 ;; Autogenerated code
@@ -976,7 +984,7 @@ uint %main(int %argc, sbyte** %argv) {
 
      (llvm-define (= x y)
                   (cond ((and (number? x) (number? y))
-                         (seteq x y))
+                         (cmpeq x y))
                         (else (ensure 0 "=: nonapplicable types."))))
      (llvm-define (> x y)
                   (cond ((and (number? x) (number? y))
@@ -1025,7 +1033,7 @@ uint %main(int %argc, sbyte** %argv) {
              ((and (symbol? x) (symbol? y))
               (if (= (string-length x) (string-length y))
                   (string/symbol-data-eq? x y 0 (string-length x)) '()))
-             (else (seteq x y))))
+             (else (cmpeq x y))))
           
      (define (member el lst)
        (cond ((null? lst) '())
@@ -1179,9 +1187,9 @@ uint %main(int %argc, sbyte** %argv) {
     (let ((res (compile (append bootstrap exp) target '())))
       (map printer llvm-string-list)
       (display bootstrap-llvm-code)
-      (display "uint %startup(uint* \"%env\") {\n")
+      (display "i32 %startup(i32* \"%env\") {\n")
       (map printer res)
-      (display (c "ret uint " (llvm-repr target)))
+      (display (c "ret i32 " (llvm-repr target)))
       (display "\n}\n")
       (display "; FUNCTIONS\n")
       (map (lambda (function) (map printer function) (newline))
@@ -1209,7 +1217,7 @@ uint %main(int %argc, sbyte** %argv) {
             (display (quote (1 2 3 4))) (newline)))
 
 ;(compiler '((display (vector-ref (vector-set! (allocate-object 2 1) 1 42) 1))))
-;(compiler '((if (seteq (object-ref (object-set! (allocate-object 2 1) 1 42) 1) 42) (print-string/symbol "foo") (print-string/symbol "bar"))))
+;(compiler '((if (cmpeq (object-ref (object-set! (allocate-object 2 1) 1 42) 1) 42) (print-string/symbol "foo") (print-string/symbol "bar"))))
 ;(compiler '((if (pair? (cons 1 2)) (print-string/symbol "foo") (print-string/symbol "bar"))))
 ;(compiler '((display (object-size (allocate-object 10 1)))))
 ;(compiler '((display (make-null))))

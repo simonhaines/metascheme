@@ -1,1 +1,2 @@
 clang -S -emit-llvm file.c
+cat compile.scm|guile -l compile.scm >out
