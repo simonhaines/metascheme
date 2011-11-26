@@ -170,6 +170,41 @@
           number? vector? string/symbol? procedure? null?
           make-null make-true
           exit))
+  (set! llvm-function-map
+    '(; Support functions
+      (allocate-bytearray . allocate-bytearray)
+      (bytearray-ref . bytearray-ref)
+      (bytearray-set! . bytearray-set)
+      (make-procedure . make-procedure)
+      (make-string/symbol . make-string-or-symbol)
+      (string-bytes . string-bytes)
+      (clear-tag . clear-tag)
+      (make-number . make-number)
+      (raw-number . raw-number)
+      (points-to . points-to)
+      (tag-eq? . tag-eq)
+      ; Primitive scheme functions
+      (llvm-read-char . llvm-read-char)
+      (print-number . print-number)
+      (print-string/symbol . print-string-or-symbol)
+      (allocate-object . allocate-object)
+      (object-size . object-size)
+      (object-ref . object-ref)
+      (object-set! . object-set)
+      (allocate-string/symbol . allocate-string-or-symbol)
+      (string-ref . string-ref)
+      (string-set! . string-set)
+      (mem-cpy . mem-cpy)
+      (apply-procedure . apply-procedure)
+      (number? . number)
+      (vector? . vector)
+      (string/symbol? . string-or-symbol)
+      (procedure? . procedure)
+      (null? . null)
+      (make-null . make-null)
+      (make-true . make-true)
+      (exit . end)
+      (main . main)))
   (set! llvm-string-list '()))
 
 (define var-counter 0)
@@ -201,7 +236,17 @@
 (define function-counter 0)
 (define (make-function-name)
   (set! function-counter (+ 1 function-counter))
-  (c "%function" (number->string function-counter)))
+  (c "@f" (number->string function-counter)))
+
+(define llvm-function-map '())
+(define (add-llvm-function-map name llvm-name)
+  (set! llvm-function-map (cons (cons name llvm-name) llvm-function-map)))
+(define (lookup-llvm-function-name name)
+  (let ((function-name-map (assoc name llvm-function-map)))
+    (if function-name-map (cdr function-name-map)
+        (let ((llvm-name (make-function-name)))
+          (add-llvm-function-map name llvm-name)
+          llvm-name))))
 
 (define llvm-primitive-functions '())
 (define (add-llvm-function-name f-name)
@@ -214,14 +259,17 @@
         (c "i32* " (llvm-repr (car params))
            (if (null? (cdr params)) "" ", ")
            (build-params (cdr params)))))
-  (set! llvm-function-list
-	(append 
-         llvm-function-list
-         (list (append-code 
-                (c "i32 " (llvm-repr f-name) "(" (build-params f-params) ") {")
+  (let ((llvm-name (lookup-llvm-function-name f-name)))
+    (set! llvm-function-list
+      (append 
+        llvm-function-list
+        (list (append-code 
+                (c "; " (llvm-function-repr f-name))
+                (c "define i32 " (llvm-function-repr llvm-name)
+                   "(" (build-params f-params) ") {")
                 f-body
                 (llvm-ret f-target)
-                (c "}"))))))
+                (c "}")))))))
 
 (define (fix-string-format str) ;; some extra work since we have no char-type.
   (define (str-ref-int str pos) (char->integer (string-ref str pos)))
@@ -268,7 +316,7 @@
 
 (define llvm-instructions
   '(;; binary operations.
-    (add . "add") (sub . "sub") (mul . "mul") (div . "div") (rem . "rem")    
+    (add . "add") (sub . "sub") (mul . "mul") (div . "udiv") (rem . "urem")    
     ;; binary bit operations.
     (bit-and . "and") (bit-or . "or") (bit-xor . "xor") 
     (bit-shl . "shl") (bit-lshr . "lshr") (bit-ashr . "ashr")
@@ -282,14 +330,19 @@
 (define llvm-boolean-instructions
   '(cmp-eq cmp-ne cmp-ult cmp-ugt cmp-slt cmp-sgt cmp-ule
     cmp-ule cmp-sle cmp-sge))
-(define llvm-shift-instructions '(bit-shl bit-shr))
+(define llvm-shift-instructions '(bit-shl bit-lshr bit-ashr))
 (define (llvm-instr-name op) (cdr (assoc op llvm-instructions)))
 
 (define (llvm-repr exp)
   (cond ((number? exp) (number->string (* 4 exp)))
-        ((symbol? exp) (c "\"%" (symbol->string exp) "\""))
+        ((symbol? exp) (c "%" (symbol->string exp)))
         ((list? exp) (cadr exp))
         (else exp)))
+
+(define (llvm-function-repr exp)
+  (if (symbol? exp)
+      (c "@" (symbol->string exp))
+      exp))
 
 (define (llvm-load target var) (lc target " = load i32* " (llvm-repr var)))
 (define (llvm-store target value) (lc "store i32 " value ", i32* " (llvm-repr target)))
@@ -300,8 +353,8 @@
     (set-stack-reg-used! reg)
     (append-code
      (llvm-alloca-var reg)
-     (llvm-cast t1 "i32*" (llvm-repr reg) "i8**")
-     (c "call void %llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)"))))
+     (llvm-bitcast t1 "i32*" (llvm-repr reg) "i8**")
+     (c "call void @llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)"))))
 
 (define (lc2 instruction)  
  (define (llvm-loader code load-code res-instruction)
@@ -347,15 +400,29 @@
     (cond ((null? arg-list) '())
           (else
            (cons (if (= fi 1) "" ", ")
-                 (cons "i32*" 
+                 (cons "i32* " 
                        (cons (arg-repr (car arg-list))
                              (build-arg-list (cdr arg-list) 0)))))))
   (lc2 
-   (append (list target " = call i32 " (llvm-repr function) "(") (build-arg-list args 1) (list ")"))))
+   (append (list target " = call i32 "
+                 (llvm-function-repr (lookup-llvm-function-name function)) "(")
+           (build-arg-list args 1)
+           (list ") ; " (llvm-function-repr function)))))
 (define (llvm-call target function . args) (llvm-call2 target function args))
 
 (define (llvm-ret value) (lc "ret i32 " value))
-(define (llvm-cast target type1 x type2) (lc target " = cast " type1 " " x " to " type2))
+
+; Conversion operations
+(define (llvm-trunc target type1 x type2)
+  (lc target " = trunc " type1 " " x " to " type2))
+(define (llvm-zext target type1 x type2)
+  (lc target " = zext " type1 " " x " to " type2))
+(define (llvm-ptrtoint target type1 x type2)
+  (lc target " = ptrtoint " type1 " " x " to " type2))
+(define (llvm-inttoptr target type1 x type2)
+  (lc target " = inttoptr " type1 " " x " to " type2))
+(define (llvm-bitcast target type1 x type2)
+  (lc target " = bitcast " type1 " " x " to " type2))
 
 (define (llvm-label label) (c label ":"))
 (define (llvm-br label) (c "br label %" label))
@@ -364,13 +431,13 @@
         (t2 (make-reg)))
     (append-code
      (llvm-call t1 'raw-number pred) ; false iff pred = 0 or '()
-     (llvm-cast t2 "i32" t1 "bool")
-     (lc "br bool " t2 ", label %" c-label ", label %" a-label))))
+     (llvm-trunc t2 "i32" t1 "i1")
+     (lc "br i1 " t2 ", label %" c-label ", label %" a-label))))
 
 (define (llvm-shift-op target op value sh)
   (let ((t1 (make-reg)))
     (append-code 
-     (llvm-cast t1 "i32" sh "i8")
+     (llvm-trunc t1 "i32" sh "i8")
      (lc target " = " (llvm-instr-name op) " i32 " value ", i8 " t1))))
 
 ;; Compiler
@@ -400,9 +467,9 @@
                (t1 (make-reg))
                (str-repr (if (string? exp) exp (symbol->string exp))))
            (append-code
-            (llvm-cast t1 (add-llvm-string str str-repr) str "i32")
+            (llvm-ptrtoint t1 (add-llvm-string str str-repr) str "i32")
             (lc target
-                " = call i32 \"@make-string-or-symbol\"(i32 " (llvm-repr t1) 
+                " = call i32 @make-string-or-symbol(i32 " (llvm-repr t1) 
                 ", i32* " (convert-to-stack-reg (string-length str-repr)) 
                 ", i32* " (convert-to-stack-reg (if (symbol? exp) 1 0)) ")"))))
         ((null? exp) (llvm-call target 'make-null))
@@ -490,7 +557,9 @@
      (compile-sequence (lambda-body exp) l-target
                        (extend-c-t-env (lambda-parameters exp) c-t-env)) l-target)
     (append-code
-     (lc target " = call i32 @make-procedure(i32 (i32*)* " f-name ", i32* " 'env ", i32* "
+     (lc target " = call i32 @make-procedure(i32 (i32*)* "
+         (llvm-function-repr (lookup-llvm-function-name f-name))
+         ", i32* " 'env ", i32* "
          (convert-to-stack-reg
           (if (lambda-arbitrary-args? exp)
               (length (lambda-parameters exp))
@@ -522,7 +591,7 @@
            ((member (operator exp) llvm-boolean-instructions) ;; FIXME: what if we compare two pointers?
             (let ((t1 (make-reg)))
               (append-code (llvm-instruction t1 (operator exp) rx ry)
-                           (llvm-cast target2 "bool" t1 "i32"))))
+                           (llvm-zext target2 "i1" t1 "i32"))))
            (else ;; binary operation
             (llvm-instruction target2 (operator exp) rx ry)))
      (lc target " = call i32 @make-number(i32 " target2 ")"))))
@@ -684,7 +753,7 @@ define i32 @tag-eq(i32* %x, i32 %tag) {
  %x.1 = load i32* %x
  %tag.1 = and i32 %x.1, 3
  %bool = icmp eq i32 %tag.1, %tag
- br bool %bool, label %eq, label %noteq
+ br i1 %bool, label %eq, label %noteq
 eq:
  ret i32 4 ; number 1
 noteq:
@@ -694,7 +763,7 @@ noteq:
 ;; Primitive scheme functions
 
 define i32 @llvm-read-char() {
-  %res = call i32 %getchar()
+  %res = call i32 @getchar()
   %res.1 = call i32 @make-number(i32 %res)
   ret i32 %res.1
 }
@@ -702,13 +771,13 @@ define i32 @llvm-read-char() {
 define i32 @print-number(i32* %format, i32* %value) {
   %format.2 = call i8* @string-bytes(i32* %format)
   %number = call i32 @raw-number(i32* %value) 
-  call int (i8*, ...)* @printf(i8* %format.2, i32 %number)
+  call i32 (i8*, ...)* @printf(i8* %format.2, i32 %number)
   ret i32 0
 }
 
-define i32 @print-string/symbol(i32* %str) {
+define i32 @print-string-or-symbol(i32* %str) {
   %str.2 = call i8* @string-bytes(i32* %str)
-  call int (i8*, ...)* %printf(i8* %str.2)
+  call i32 (i8*, ...)* @printf(i8* %str.2)
   ret i32 0
 }
 
@@ -736,25 +805,25 @@ define i32 @object-size(i32* %x) {
 
 define i32 @object-ref(i32* %obj, i32* %index) {
  %ptr = call i32* @points-to(i32* %obj)
- %index = call i32 @raw-number(i32* %index)
- %index.1 = add i32 %index, 1
- %ptr.1 = getelementptr i32* %ptr, i32 %index.1
+ %index.1 = call i32 @raw-number(i32* %index)
+ %index.2 = add i32 %index.1, 1
+ %ptr.1 = getelementptr i32* %ptr, i32 %index.2
  %ref = load i32* %ptr.1 ;; gcread
  ret i32 %ref
 }
 
-define i32 @object-set!(i32* %obj, i32* %index, i32* %value) {
+define i32 @object-set(i32* %obj, i32* %index, i32* %value) {
  %ptr = call i32* @points-to(i32* %obj)
- %index = call i32 @raw-number(i32* %index)
- %index.1 = add i32 %index, 1
- %ptr.1 = getelementptr i32* %ptr, i32 %index.1
+ %index.1 = call i32 @raw-number(i32* %index)
+ %index.2 = add i32 %index.1, 1
+ %ptr.1 = getelementptr i32* %ptr, i32 %index.2
  %val = load i32* %value ;; gcread
  store i32 %val, i32* %ptr.1 ;; gcwrite
  %res = load i32* %obj
  ret i32 %res
 }
 
-define i32 @allocate-string/symbol(i32* %size, i32* %symbolp) {
+define i32 @allocate-string-or-symbol(i32* %size, i32* %symbolp) {
   %bytes = call i32 @allocate-bytearray(i32 *%size)
   %res = call i32 @make-string-or-symbol(i32 %bytes, i32* %size, i32* %symbolp)
   ret i32 %res
@@ -767,7 +836,7 @@ define i32 @string-ref(i32* %str, i32* %index) {
  ret i32 %res
 }
 
-define i32 @string-set!(i32* %str, i32* %index, i32* %value) {
+define i32 @string-set(i32* %str, i32* %index, i32* %value) {
  %bytes = call i8* @string-bytes(i32* %str)
  %index.1 = call i32 @raw-number(i32* %index)
  %value.1 = call i32 @raw-number(i32* %value)
@@ -796,30 +865,30 @@ define i32 @apply-procedure(i32* %proc, i32* %callenv) {
  ret i32 %res
 }
 
-define i32 @number?(i32* %x) {
- %res = call i32 @tag-eq?(i32* %x, i32 0)
+define i32 @number(i32* %x) {
+ %res = call i32 @tag-eq(i32* %x, i32 0)
  ret i32 %res
 }
 
-define i32 @vector?(i32* %x) {
- %res = call i32 @tag-eq?(i32* %x, i32 1)
+define i32 @vector(i32* %x) {
+ %res = call i32 @tag-eq(i32* %x, i32 1)
  ret i32 %res
 }
 
-define i32 @string/symbol?(i32* %x) {
- %res = call i32 @tag-eq?(i32* %x, i32 2);
+define i32 @string-or-symbol(i32* %x) {
+ %res = call i32 @tag-eq(i32* %x, i32 2);
  ret i32 %res
 }
 
-define i32 @procedure?(i32* %x) {
- %res = call i32 @tag-eq?(i32* %x, i32 3)
+define i32 @procedure(i32* %x) {
+ %res = call i32 @tag-eq(i32* %x, i32 3)
  ret i32 %res
 }
 
-define i32 @null?(i32* %x) {
+define i32 @null(i32* %x) {
  %x.1 = load i32* %x
  %bool = icmp eq i32 %x.1, 1 ; null vector pointer?
- br bool %bool, label %eq, label %noteq
+ br i1 %bool, label %eq, label %noteq
 eq:
  ret i32 4 ; number 1
 noteq:
@@ -834,17 +903,17 @@ define i32 @make-true() {
  ret i32 4
 }
 
-define i32 @exit() {
-  call int(int)* @exit(int 0)
+define i32 @end() {
+  call i32(i32)* @exit(i32 0)
   ret i32 0
 }
 
-define i32 @main(int %argc, i8** %argv) {
+define i32 @main(i32 %argc, i8** %argv) {
   call void @llvm_gc_initialize(i32 2000000)
 
   %env = alloca i32
   store i32 0, i32* %env
-  %res = call i32 %startup(i32* %env)
+  %res = call i32 @startup(i32* %env)
   ret i32 %res
 }
 
@@ -984,16 +1053,16 @@ define i32 @main(int %argc, i8** %argv) {
 
      (llvm-define (= x y)
                   (cond ((and (number? x) (number? y))
-                         (cmpeq x y))
+                         (cmp-eq x y))
                         (else (ensure 0 "=: nonapplicable types."))))
      (llvm-define (> x y)
                   (cond ((and (number? x) (number? y))
-                         (setgt x y))
+                         (cmp-ugt x y))
                         (else (ensure 0 ">: nonapplicable types."))))
 
      (llvm-define (< x y)
                   (cond ((and (number? x) (number? y))
-                         (setlt x y))
+                         (cmp-ult x y))
                         (else (ensure 0 "<: nonapplicable types."))))
 
      
@@ -1033,7 +1102,7 @@ define i32 @main(int %argc, i8** %argv) {
              ((and (symbol? x) (symbol? y))
               (if (= (string-length x) (string-length y))
                   (string/symbol-data-eq? x y 0 (string-length x)) '()))
-             (else (cmpeq x y))))
+             (else (cmp-eq x y))))
           
      (define (member el lst)
        (cond ((null? lst) '())
@@ -1187,7 +1256,7 @@ define i32 @main(int %argc, i8** %argv) {
     (let ((res (compile (append bootstrap exp) target '())))
       (map printer llvm-string-list)
       (display bootstrap-llvm-code)
-      (display "i32 %startup(i32* \"%env\") {\n")
+      (display "define i32 @startup(i32* %env) {\n")
       (map printer res)
       (display (c "ret i32 " (llvm-repr target)))
       (display "\n}\n")
