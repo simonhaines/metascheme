@@ -346,12 +346,14 @@
 
 (define (llvm-load target var) (lc target " = load i32* " (llvm-repr var)))
 (define (llvm-store target value) (lc "store i32 " value ", i32* " (llvm-repr target)))
-(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca i32"))
+(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca i8, i32 4"))
 
 (define (llvm-init-stack-reg reg)
   (let ((t1 (make-reg)))
     (set-stack-reg-used! reg)
     (append-code
+      ;http://www.blushingpenguin.com/svn/trunk/3rdparty/clamav/libclamav/c++/llvm/test/CodeGen/X86/GC/alloc_loop.ll
+      ;http://lists.cs.uiuc.edu/pipermail/llvmdev/2011-June/040562.html
      (llvm-alloca-var reg)
      (llvm-bitcast t1 "i32*" (llvm-repr reg) "i8**")
      (c "call void @llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)"))))
