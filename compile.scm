@@ -266,7 +266,7 @@
         (list (append-code 
                 (c "; " (llvm-function-repr f-name))
                 (c "define i32 " (llvm-function-repr llvm-name)
-                   "(" (build-params f-params) ") {")
+                   "(" (build-params f-params) ") gc \"shadow-stack\" {")
                 f-body
                 (llvm-ret f-target)
                 (c "}")))))))
@@ -346,7 +346,8 @@
 
 (define (llvm-load target var) (lc target " = load i32* " (llvm-repr var)))
 (define (llvm-store target value) (lc "store i32 " value ", i32* " (llvm-repr target)))
-(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca i8, i32 4"))
+(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca i8*, align 4"))
+;(define (llvm-alloca-var target) (c (llvm-repr target) " = alloca i32"))
 
 (define (llvm-init-stack-reg reg)
   (let ((t1 (make-reg)))
@@ -354,9 +355,13 @@
     (append-code
       ;http://www.blushingpenguin.com/svn/trunk/3rdparty/clamav/libclamav/c++/llvm/test/CodeGen/X86/GC/alloc_loop.ll
       ;http://lists.cs.uiuc.edu/pipermail/llvmdev/2011-June/040562.html
-     (llvm-alloca-var reg)
-     (llvm-bitcast t1 "i32*" (llvm-repr reg) "i8**")
-     (c "call void @llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)"))))
+      (llvm-alloca-var t1)
+      (c "call void @llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)")
+      (llvm-bitcast (llvm-repr reg) "i8**" (llvm-repr t1) "i32*"))))
+;      (llvm-alloca-var reg)
+;      (llvm-bitcast t1 "i32*" (llvm-repr reg) "i8**")
+;      (c "call void @llvm.gcroot(i8** " (llvm-repr t1) ", i8* null)"))))
+
 
 (define (lc2 instruction)  
  (define (llvm-loader code load-code res-instruction)
@@ -648,7 +653,7 @@ declare i8* @llvm_gc_allocate(i32)
 declare void @llvm_gc_initialize(i32)
 
 declare void @llvm.gcroot(i8**, i8*)
-declare void @llvm.gcwrite(i8*, i8*, i8**)
+;declare void @llvm.gcwrite(i8*, i8*, i8**)
 
 ;; Support functions
 
@@ -1258,7 +1263,7 @@ define i32 @main(i32 %argc, i8** %argv) {
     (let ((res (compile (append bootstrap exp) target '())))
       (map printer llvm-string-list)
       (display bootstrap-llvm-code)
-      (display "define i32 @startup(i32* %env) {\n")
+      (display "define i32 @startup(i32* %env) gc \"shadow-stack\" {\n")
       (map printer res)
       (display (c "ret i32 " (llvm-repr target)))
       (display "\n}\n")
