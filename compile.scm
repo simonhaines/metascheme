@@ -474,7 +474,7 @@
                (t1 (make-reg))
                (str-repr (if (string? exp) exp (symbol->string exp))))
            (append-code
-            (llvm-ptrtoint t1 (add-llvm-string str str-repr) str "i32")
+            (llvm-ptrtoint t1 (add-llvm-string str str-repr) str "i64")
             (lc target
                 " = call i64 @make-string-or-symbol(i64 " (llvm-repr t1) 
                 ", i64* " (convert-to-stack-reg (string-length str-repr)) 
@@ -598,7 +598,7 @@
            ((member (operator exp) llvm-boolean-instructions) ;; FIXME: what if we compare two pointers?
             (let ((t1 (make-reg)))
               (append-code (llvm-instruction t1 (operator exp) rx ry)
-                           (llvm-zext target2 "i1" t1 "i32"))))
+                           (llvm-zext target2 "i1" t1 "i64"))))
            (else ;; binary operation
             (llvm-instruction target2 (operator exp) rx ry)))
      (lc target " = call i64 @make-number(i64 " target2 ")"))))
@@ -756,7 +756,7 @@ define i64* @points-to(i64* %x) {
  ret i64* %ptr.1
 }
 
-define i64 @tag-eq(i64* %x, i64 %tag) {
+define i64 @tag-eq(i64* %x, i64 %tag) {  ; SH tag argument can be i32
  %x.1 = load i64* %x
  %tag.1 = and i64 %x.1, 3
  %bool = icmp eq i64 %tag.1, %tag
@@ -790,140 +790,139 @@ define i32 @print-string-or-symbol(i64* %str) {
 }
 
 define i32 @allocate-object(i64* %size, i64* %tag) {
-;TODO up to here
- %size.1 = load i32* %size        ; loading number gives size * 4.
- %alloc_size = add i32 %size.1, 4 ; header.
+ %size.1 = load i64* %size        ; loading number gives size * 4.
+ %alloc_size = add i32 %size.1, 8 ; header.
  %obj = call i8* @llvm_gc_allocate(i32 %alloc_size)
- %obj.1 = bitcast i8* %obj to i32*
- %tag.1 = call i32 @raw-number(i32* %tag)
- %objtag.1 = or i32 %size.1, %tag.1
- %objtag.2 = shl i32 %objtag.1, 1 ; forwarding/mark bit
- store i32 %objtag.2, i32* %obj.1
- %res = ptrtoint i8* %obj to i32
- %res.1 = or i32 %res, %tag.1     ; type tag.
- ret i32 %res.1
+ %obj.1 = bitcast i8* %obj to i64*
+ %tag.1 = call i64 @raw-number(i64* %tag)
+ %objtag.1 = or i64 %size.1, %tag.1
+ %objtag.2 = shl i64 %objtag.1, 1 ; forwarding/mark bit
+ store i64 %objtag.2, i32* %obj.1
+ %res = ptrtoint i8* %obj to i64
+ %res.1 = or i64 %res, %tag.1     ; type tag.
+ ret i64 %res.1
 }
 
-define i32 @object-size(i32* %x) {
- %ptr = call i32* @points-to(i32* %x)
- %size = load i32* %ptr
- %size.1 = lshr i32 %size, 3
- %size.2 = shl i32 %size.1, 2
- ret i32 %size.2
+define i64 @object-size(i64* %x) {
+ %ptr = call i64* @points-to(i64* %x)
+ %size = load i64* %ptr
+ %size.1 = lshr i64 %size, 3
+ %size.2 = shl i64 %size.1, 2
+ ret i64 %size.2
 }
 
-define i32 @object-ref(i32* %obj, i32* %index) {
- %ptr = call i32* @points-to(i32* %obj)
- %index.1 = call i32 @raw-number(i32* %index)
- %index.2 = add i32 %index.1, 1
- %ptr.1 = getelementptr i32* %ptr, i32 %index.2
- %ref = load i32* %ptr.1 ;; gcread
- ret i32 %ref
+define i64 @object-ref(i64* %obj, i64* %index) {
+ %ptr = call i64* @points-to(i64* %obj)
+ %index.1 = call i64 @raw-number(i64* %index)
+ %index.2 = add i64 %index.1, 1
+ %ptr.1 = getelementptr i64* %ptr, i64 %index.2
+ %ref = load i64* %ptr.1 ;; gcread
+ ret i64 %ref
 }
 
-define i32 @object-set(i32* %obj, i32* %index, i32* %value) {
- %ptr = call i32* @points-to(i32* %obj)
- %index.1 = call i32 @raw-number(i32* %index)
- %index.2 = add i32 %index.1, 1
- %ptr.1 = getelementptr i32* %ptr, i32 %index.2
- %val = load i32* %value ;; gcread
- store i32 %val, i32* %ptr.1 ;; gcwrite
- %res = load i32* %obj
- ret i32 %res
+define i64 @object-set(i64* %obj, i64* %index, i64* %value) {
+ %ptr = call i64* @points-to(i64* %obj)
+ %index.1 = call i64 @raw-number(i64* %index)
+ %index.2 = add i64 %index.1, 1
+ %ptr.1 = getelementptr i64* %ptr, i64 %index.2
+ %val = load i64* %value ;; gcread
+ store i64 %val, i64* %ptr.1 ;; gcwrite
+ %res = load i64* %obj
+ ret i64 %res
 }
 
-define i32 @allocate-string-or-symbol(i32* %size, i32* %symbolp) {
-  %bytes = call i32 @allocate-bytearray(i32 *%size)
-  %res = call i32 @make-string-or-symbol(i32 %bytes, i32* %size, i32* %symbolp)
-  ret i32 %res
+define i64 @allocate-string-or-symbol(i64* %size, i64* %symbolp) {
+  %bytes = call i64 @allocate-bytearray(i64 *%size)
+  %res = call i64 @make-string-or-symbol(i64 %bytes, i64* %size, i64* %symbolp)
+  ret i64 %res
 }
 
-define i32 @string-ref(i32* %str, i32* %index) {
- %bytes = call i8* @string-bytes(i32* %str)
- %index.1 = call i32 @raw-number(i32* %index)
- %res = call i32 @bytearray-ref(i8* %bytes, i32 %index.1)
- ret i32 %res
+define i64 @string-ref(i64* %str, i64* %index) {
+ %bytes = call i8* @string-bytes(i64* %str)
+ %index.1 = call i64 @raw-number(i64* %index)
+ %res = call i64 @bytearray-ref(i8* %bytes, i64 %index.1)
+ ret i64 %res
 }
 
-define i32 @string-set(i32* %str, i32* %index, i32* %value) {
- %bytes = call i8* @string-bytes(i32* %str)
- %index.1 = call i32 @raw-number(i32* %index)
- %value.1 = call i32 @raw-number(i32* %value)
- call void @bytearray-set(i8* %bytes, i32 %index.1, i32 %value.1)
- %res = load i32* %str
- ret i32 %res
+define i64 @string-set(i64* %str, i64* %index, i64* %value) {
+ %bytes = call i8* @string-bytes(i64* %str)
+ %index.1 = call i64 @raw-number(i64* %index)
+ %value.1 = call i64 @raw-number(i64* %value)
+ call void @bytearray-set(i8* %bytes, i64 %index.1, i64 %value.1)
+ %res = load i64* %str
+ ret i64 %res
 }
 
-define i32 @mem-cpy(i32* %src, i32* %dst, i32* %size) {
- %src.1 = call i32* @points-to(i32* %src)
- %src.2 = bitcast i32* %src.1 to i8*
- %dst.1 = call i32* @points-to(i32* %dst)
- %dst.2 = bitcast i32* %dst.1 to i8*
- %size.2 = call i32 @raw-number(i32* %size)
- call void @llvm.memcpy(i8* %dst.2, i8* %src.2, i32 %size.2, i32 0)
- %res = load i32* %dst
- ret i32 %res
+define i64 @mem-cpy(i64* %src, i64* %dst, i64* %size) {
+ %src.1 = call i64* @points-to(i64* %src)
+ %src.2 = bitcast i64* %src.1 to i8*
+ %dst.1 = call i64* @points-to(i64* %dst)
+ %dst.2 = bitcast i64* %dst.1 to i8*
+ %size.2 = call i64 @raw-number(i64* %size)
+ call void @llvm.memcpy(i8* %dst.2, i8* %src.2, i64 %size.2, i64 0)
+ %res = load i64* %dst
+ ret i64 %res
 }
 
-define i32 @apply-procedure(i32* %proc, i32* %callenv) {
- %proc.1 = call i32* @points-to(i32* %proc)
- %ptr.1 = getelementptr i32* %proc.1, i32 1
- %raw-func = load i32* %ptr.1
- %raw-func.1 = inttoptr i32 %raw-func to i32 (i32*)*
- %res = call i32 %raw-func.1(i32* %callenv)
- ret i32 %res
+define i64 @apply-procedure(i64* %proc, i64* %callenv) {
+ %proc.1 = call i64* @points-to(i64* %proc)
+ %ptr.1 = getelementptr i64* %proc.1, i32 1
+ %raw-func = load i64* %ptr.1
+ %raw-func.1 = inttoptr i64 %raw-func to i64 (i64*)*
+ %res = call i64 %raw-func.1(i64* %callenv)
+ ret i64 %res
 }
 
-define i32 @number(i32* %x) {
- %res = call i32 @tag-eq(i32* %x, i32 0)
- ret i32 %res
+define i64 @number(i64* %x) {
+ %res = call i64 @tag-eq(i64* %x, i64 0)
+ ret i64 %res
 }
 
-define i32 @vector(i32* %x) {
- %res = call i32 @tag-eq(i32* %x, i32 1)
- ret i32 %res
+define i64 @vector(i64* %x) {
+ %res = call i64 @tag-eq(i64* %x, i64 1)
+ ret i64 %res
 }
 
-define i32 @string-or-symbol(i32* %x) {
- %res = call i32 @tag-eq(i32* %x, i32 2);
- ret i32 %res
+define i64 @string-or-symbol(i64* %x) {
+ %res = call i64 @tag-eq(i64* %x, i64 2);
+ ret i64 %res
 }
 
-define i32 @procedure(i32* %x) {
- %res = call i32 @tag-eq(i32* %x, i32 3)
- ret i32 %res
+define i64 @procedure(i64* %x) {
+ %res = call i64 @tag-eq(i64* %x, i64 3)
+ ret i64 %res
 }
 
-define i32 @null(i32* %x) {
- %x.1 = load i32* %x
- %bool = icmp eq i32 %x.1, 1 ; null vector pointer?
+define i64 @null(i64* %x) {
+ %x.1 = load i64* %x
+ %bool = icmp eq i64 %x.1, 1 ; null vector pointer?
  br i1 %bool, label %eq, label %noteq
 eq:
- ret i32 4 ; number 1
+ ret i64 4 ; number 1
 noteq:
- ret i32 0 ; number 0
+ ret i64 0 ; number 0
 }
 
-define i32 @make-null() {
- ret i32 1
+define i64 @make-null() {
+ ret i64 1
 }
 
-define i32 @make-true() {
- ret i32 4
+define i64 @make-true() {
+ ret i64 4
 }
 
-define i32 @end() {
-  call i32(i32)* @exit(i32 0)
-  ret i32 0
+define i64 @end() {
+  call i64(i64)* @exit(i64 0)
+  ret i64 0
 }
 
-define i32 @main(i32 %argc, i8** %argv) {
+define i64 @main(i64 %argc, i8** %argv) {
   call void @llvm_gc_initialize(i32 2000000)
 
-  %env = alloca i32
-  store i32 0, i32* %env
-  %res = call i32 @startup(i32* %env)
-  ret i32 %res
+  %env = alloca i64
+  store i64 0, i64* %env
+  %res = call i64 @startup(i64* %env)
+  ret i64 %res
 }
 
 ;; Autogenerated code
@@ -1265,9 +1264,9 @@ define i32 @main(i32 %argc, i8** %argv) {
     (let ((res (compile (append bootstrap exp) target '())))
       (map printer llvm-string-list)
       (display bootstrap-llvm-code)
-      (display "define i32 @startup(i32* %env) gc \"shadow-stack\" {\n")
+      (display "define i64 @startup(i64* %env) gc \"shadow-stack\" {\n")
       (map printer res)
-      (display (c "ret i32 " (llvm-repr target)))
+      (display (c "ret i64 " (llvm-repr target)))
       (display "\n}\n")
       (display "; FUNCTIONS\n")
       (map (lambda (function) (map printer function) (newline))
