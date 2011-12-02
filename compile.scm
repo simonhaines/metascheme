@@ -658,10 +658,11 @@ declare void @llvm.gcroot(i8**, i8*)
 ;; Support functions
 
 define i64 @allocate-bytearray(i64* %size) {
-  %size1 = call i64 @raw-number(i64* %size)
-  %res = malloc i8, i64 %size1
-  %res1 = ptrtoint i8* %res to i64
-  ret i64 %res1
+  %size.1 = call i64 @raw-number(i64* %size)
+  %size.2 = trunc i64 %size.1 to i32
+  %res = malloc i8, i32 %size.2
+  %res.1 = ptrtoint i8* %res to i64
+  ret i64 %res.1
 }
 
 define i64 @bytearray-ref(i8* %arr, i64 %index) {
@@ -701,8 +702,8 @@ define i64 @make-procedure(i64 (i64*)* %raw-func, i64* %env, i64* %nparams) {
  ret i64 %res.1
 }
 
-define i32 @make-string-or-symbol(i64 %raw-str, i64* %size, i64* %symbolp) {
- %obj = call i8* @llvm_gc_allocate(i32 32)  ; 4 x 8-byte words
+define i64 @make-string-or-symbol(i64 %raw-str, i64* %size, i64* %symbolp) {
+ %obj = call i8* @gc_alloc(i32 32)  ; 4 x 8-byte words
  %obj.1 = bitcast i8* %obj to i64*
  store i64 36, i64* %obj.1 ; size 4, tag 2, forward bit = 0
 
@@ -722,7 +723,7 @@ define i32 @make-string-or-symbol(i64 %raw-str, i64* %size, i64* %symbolp) {
  ret i64 %res.1
 }
 
-define i8* @string-bytes(i32* %str) {
+define i8* @string-bytes(i64* %str) {
  %str.1 = call i64* @points-to(i64* %str)
  %str.2 = getelementptr i64* %str.1, i32 1
  %bytes = load i64* %str.2
@@ -780,24 +781,25 @@ define i64 @print-number(i64* %format, i64* %value) {
   %format.2 = call i8* @string-bytes(i64* %format)
   %number = call i64 @raw-number(i64* %value) 
   call i32 (i8*, ...)* @printf(i8* %format.2, i64 %number)
-  ret i32 0
+  ret i64 0
 }
 
-define i32 @print-string-or-symbol(i64* %str) {
+define i64 @print-string-or-symbol(i64* %str) {
   %str.2 = call i8* @string-bytes(i64* %str)
   call i32 (i8*, ...)* @printf(i8* %str.2)
-  ret i32 0
+  ret i64 0
 }
 
-define i32 @allocate-object(i64* %size, i64* %tag) {
+define i64 @allocate-object(i64* %size, i64* %tag) {
  %size.1 = load i64* %size        ; loading number gives size * 4.
- %alloc_size = add i32 %size.1, 8 ; header.
- %obj = call i8* @llvm_gc_allocate(i32 %alloc_size)
+ %size.2 = add i64 %size.1, 8     ; header.
+ %alloc_size = trunc i64 %size.2 to i32
+ %obj = call i8* @gc_alloc(i32 %alloc_size)
  %obj.1 = bitcast i8* %obj to i64*
  %tag.1 = call i64 @raw-number(i64* %tag)
  %objtag.1 = or i64 %size.1, %tag.1
  %objtag.2 = shl i64 %objtag.1, 1 ; forwarding/mark bit
- store i64 %objtag.2, i32* %obj.1
+ store i64 %objtag.2, i64* %obj.1
  %res = ptrtoint i8* %obj to i64
  %res.1 = or i64 %res, %tag.1     ; type tag.
  ret i64 %res.1
@@ -859,7 +861,8 @@ define i64 @mem-cpy(i64* %src, i64* %dst, i64* %size) {
  %dst.1 = call i64* @points-to(i64* %dst)
  %dst.2 = bitcast i64* %dst.1 to i8*
  %size.2 = call i64 @raw-number(i64* %size)
- call void @llvm.memcpy(i8* %dst.2, i8* %src.2, i64 %size.2, i64 0)
+ %size.3 = trunc i64 %size.2 to i32
+ call void @llvm.memcpy(i8* %dst.2, i8* %src.2, i32 %size.3, i32 0)
  %res = load i64* %dst
  ret i64 %res
 }
@@ -912,12 +915,12 @@ define i64 @make-true() {
 }
 
 define i64 @end() {
-  call i64(i64)* @exit(i64 0)
+  call i32(i32)* @exit(i32 0)
   ret i64 0
 }
 
 define i64 @main(i64 %argc, i8** %argv) {
-  call void @llvm_gc_initialize(i32 2000000)
+  call void @gc_init(i32 2000000)
 
   %env = alloca i64
   store i64 0, i64* %env
