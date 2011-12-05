@@ -33,9 +33,9 @@
 #include "gc.h"
 
 // Heap management
-static int8_t *from_space, *from_limit;
-static int8_t *to_space, *to_limit;
-static int8_t *to_alloc;
+static uint8_t *from_space, *from_limit;
+static uint8_t *to_space, *to_limit;
+static uint8_t *to_alloc;
 
 void gc_init(uint32_t heapsize) {
 	// Check size
@@ -49,26 +49,26 @@ void gc_init(uint32_t heapsize) {
 #endif
 
 	// Allocate heap space
-	from_space = (int8_t*) malloc(heapsize);
+	from_space = (uint8_t*) malloc(heapsize);
 	memset(from_space, 0, heapsize);
 	from_limit = from_space + heapsize + 1;
 
-	to_space = (int8_t*) malloc(heapsize);
+	to_space = (uint8_t*) malloc(heapsize);
 	memset(to_space, 0, heapsize);
 	to_limit = to_space + heapsize + 1;
 	to_alloc = to_space;
 
 	// Ensure alignment
-	if (((uint64_t) from_space) & 0x07 != 0 ||
-			((uint64_t) to_space) & 0x07 != 0) {
-		print("Heap space alignment error\n");
+	if ((((uint64_t) from_space) & 0x07) != 0 ||
+			(((uint64_t) to_space) & 0x07) != 0) {
+		printf("Heap space alignment error\n");
 		exit(1);
 	}
 
 #ifdef VERBOSE
-	printf("  From space is: 0x%016X .. 0x%016X\n", (uint64_t) from_space,
+	printf("  From space is: 0x%016lX .. 0x%016lX\n", (uint64_t) from_space,
 			(uint64_t) from_limit);
-	printf("    To space is: 0x%016X .. 0x%016X\n", (uint64_t) to_space,
+	printf("    To space is: 0x%016lX .. 0x%016lX\n", (uint64_t) to_space,
 			(uint64_t) to_limit);
 #endif
 }
@@ -83,22 +83,17 @@ void gc_shutdown() {
 	free(to_space);
 }
 
-int object_in_from_space(void *obj) {
-	return (((uint64_t) obj) > ((uint64_t) from_space) &&
-			((uint64_t) obj) < ((uint64_t) from_limit));
-}
-
 // Dereference a tagged 64-bit pointer
-uint64_t* points_to(int8_t *ptr) {
+uint64_t* points_to(uint8_t *ptr) {
 	uint64_t *x = (uint64_t*) ptr;
 	return (uint64_t*) ((*x >> 2) << 2);
 }
 
-static void copy_and_forward(int8_t *cell) {
+static void copy_and_forward(uint8_t *cell) {
 	uint64_t *ptr = (uint64_t*) cell;
 	uint64_t tag = *ptr & 0x03;
 	if (tag == 0) {
-		printf("Fatal: Unboxed type at heap location 0x%016X\n",
+		printf("Fatal: Unboxed type at heap location 0x%016lX\n",
 				(uint64_t) ptr);
 		exit(1);
 	}
@@ -124,7 +119,7 @@ static void copy_and_forward(int8_t *cell) {
 void gc_collect() {
 #ifdef VERBOSE
 	printf("Heap use before collection: %d of %d bytes\n",
-			to_alloc - to_space, to-limit - to_space + 1);
+			to_alloc - to_space, to_limit - to_space + 1);
 #endif
 
 	// Swap spaces
@@ -158,13 +153,14 @@ void gc_collect() {
 	}
 
 	// Scan for references and copy those
-	int8_t *scan = to_space;
+	uint8_t *scan = to_space;
 	while (scan < to_alloc) {
 		uint64_t *cell = (uint64_t*)scan;
 		uint64_t tag = (*cell >> 1) & 0x03;
 		switch(tag) {
 			case 0:
-				printf("Fatal: Unboxed type at heap location 0x%016X\n", cell);
+				printf("Fatal: Unboxed type at heap location 0x%016lX\n",
+						(uint64_t) cell);
 				exit(1);
 			case 1: {
 					// Vector
@@ -188,7 +184,7 @@ void gc_collect() {
 	}
 }
 
-int8_t* gc_alloc(uint32_t size) {
+uint8_t* gc_alloc(uint32_t size) {
 	// Add memory cell prefix
 	size += sizeof(uint64_t);
 
@@ -201,19 +197,19 @@ int8_t* gc_alloc(uint32_t size) {
 
 		if (to_alloc + size - 1 > to_limit) {
 			printf("Fatal: not enough heap space after collection\n"
-					"(required is %d bytes, available is %d bytes)\n",
+					"(required is %ld bytes, available is %d bytes)\n",
 					to_limit - to_alloc + 1, size);
 			exit(1);
 		}
 	}
 
 	// Allocate memory
-	int8_t *memory = to_alloc;
+	uint8_t *memory = to_alloc;
 	to_alloc += size;
 
 #ifdef VERBOSE
-	printf("%d bytes allocated at 0x%016X, heap size is now %d bytes\n",
-			(unsigned int) memory, to_alloc - to_space);
+	printf("%d bytes allocated at 0x%016lX, heap size is now %d bytes\n",
+			size, memory, to_alloc - to_space);
 #endif
 	return memory;
 }

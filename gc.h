@@ -8,7 +8,7 @@
 #include <inttypes.h>
 
 void gc_init(uint32_t heapsize);
-int8_t* gc_alloc(uint32_t size);
+uint8_t* gc_alloc(uint32_t size);
 void gc_collect();
 void gc_shutdown();
 
