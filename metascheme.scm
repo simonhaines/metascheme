@@ -252,6 +252,22 @@
 (define (add-llvm-function-name f-name)
   (set! llvm-primitive-functions (cons f-name llvm-primitive-functions)))
 
+; Debug
+(define (trace name params)
+  (define (build-params params)
+    (if (null? params) ""
+        (c ", i64* " (llvm-repr (car params))
+           (build-params (cdr params)))))
+  (let ((global (make-global))
+        (str (if (symbol? name) (symbol->string name) name))
+        (target (make-reg)))
+    (append-code
+      (llvm-bitcast (llvm-repr target)
+                    (add-llvm-string global str) global "i8*")
+      (c "call void(i8*, i32, ...)* @db_trace(i8* " (llvm-repr target) ", "
+         "i32 " (number->string (length params))
+         (build-params params) ")"))))
+
 (define llvm-function-list '())
 (define (add-llvm-function f-name f-params f-body f-target)
   (define (build-params params)
@@ -267,6 +283,7 @@
                 (c "; " (llvm-function-repr f-name))
                 (c "define i64 " (llvm-function-repr llvm-name)
                    "(" (build-params f-params) ") gc \"shadow-stack\" {")
+                (trace f-name f-params)
                 f-body
                 (llvm-ret f-target)
                 (c "}")))))))
@@ -654,6 +671,9 @@ declare i8* @gc_alloc(i32)
 
 declare void @llvm.gcroot(i8**, i8*)
 ;declare void @llvm.gcwrite(i8*, i8*, i8**)
+
+; Debug
+declare void @db_trace(i8*, i32, ...)
 
 ;; Support functions
 
@@ -1066,7 +1086,7 @@ define i32 @main(i32 %argc, i8** %argv) {
      (llvm-define (= x y)
                   (cond ((and (number? x) (number? y))
                          (cmp-eq x y))
-                        (else (begin (display y)(ensure 0 "=: nonapplicable types.")))))
+                        (else (ensure 0 "=: nonapplicable types."))))
      (llvm-define (> x y)
                   (cond ((and (number? x) (number? y))
                          (cmp-ugt x y))

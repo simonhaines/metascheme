@@ -1,16 +1,22 @@
 SCHEME=guile
 
-all:	compile.bc gc.so
-	lli -load=./gc.so compile.bc
+all:	metascheme.bc rt.so
+	lli -load=./rt.so metascheme.bc
 
-compile.S:	compile.scm
-	${SCHEME} compile.scm >compile.S
+metascheme.S:	metascheme.scm
+	${SCHEME} metascheme.scm >metascheme.S
 
-gc.so:	gc.c gc.h llvm_gc_support.h
-	gcc -DVERBOSE -fPIC -shared -o gc.so gc.c
+metascheme.bc:	metascheme.S
+	llvm-as -o metascheme.bc metascheme.S
 
-compile.bc:	compile.S
-	llvm-as -o compile.bc compile.S
+gc.o:	gc.c gc.h llvm_gc_support.h
+	gcc -DVERBOSE -fPIC -o gc.o -c gc.c
+
+db.o:	db.c db.h
+	gcc -fPIC -o db.o -c db.c
+
+rt.so:	gc.o db.o
+	gcc -shared -o rt.so gc.o db.o
 
 clean:
-	rm compile.S gc.so compile.bc
+	rm metascheme.S metascheme.bc rt.so gc.o db.o
