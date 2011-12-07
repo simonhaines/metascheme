@@ -45,6 +45,13 @@
 ;;
 ;; -- The Implementation --
 
+; -- Heap Layout --
+; Strings: 4 x 64-bit words
+;   1: Header (size | tag) << 1
+;   2: Raw bytes (pointer)
+;   3: Size as an immediate fixnum
+;   4: Symbol? boolean as an immediate fixnum
+
 (begin
   
 (define (error func str)
@@ -681,6 +688,7 @@ define i64 @allocate-bytearray(i64* %size) {
   %size.1 = call i64 @raw-number(i64* %size)
   %size.2 = trunc i64 %size.1 to i32
   %res = malloc i8, i32 %size.2
+  store i8 0, i8* %res  ; String sentinel
   %res.1 = ptrtoint i8* %res to i64
   ret i64 %res.1
 }
@@ -703,7 +711,7 @@ define void @bytearray-set(i8* %arr, i64 %index, i64 %value) {
 define i64 @make-procedure(i64 (i64*)* %raw-func, i64* %env, i64* %nparams) {
  %obj = call i8* @gc_alloc(i32 32)  ; 4 x 8-byte words
  %obj.1 = bitcast i8* %obj to i64*
- store i64 38, i64* %obj.1 ; size 4, tag 3, forward bit = 0
+ store i64 70, i64* %obj.1 ; size 8, tag 3, forward bit = 0
 
  %ptr.1 = getelementptr i64* %obj.1, i32 1
  %raw-func.1 = ptrtoint i64 (i64*)* %raw-func to i64
@@ -725,7 +733,7 @@ define i64 @make-procedure(i64 (i64*)* %raw-func, i64* %env, i64* %nparams) {
 define i64 @make-string-or-symbol(i64 %raw-str, i64* %size, i64* %symbolp) {
  %obj = call i8* @gc_alloc(i32 32)  ; 4 x 8-byte words
  %obj.1 = bitcast i8* %obj to i64*
- store i64 36, i64* %obj.1 ; size 4, tag 2, forward bit = 0
+ store i64 68, i64* %obj.1 ; size 8, tag 2, forward bit = 0
 
  %ptr.1 = getelementptr i64* %obj.1, i32 1
  store i64 %raw-str, i64* %ptr.1
@@ -810,14 +818,19 @@ define i64 @print-string-or-symbol(i64* %str) {
   ret i64 0
 }
 
+@trace-allocate-object = private unnamed_addr constant [16 x i8] c\"allocate-object\\00\"
 define i64 @allocate-object(i64* %size, i64* %tag) {
+ %str-reg = bitcast [16 x i8]* @trace-allocate-object to i8*
+ call void(i8*, i32, ...)* @db_trace(i8* %str-reg, i32 2, i64* %size, i64* %tag)
+
  %size.1 = load i64* %size        ; loading number gives size * 4.
- %size.2 = add i64 %size.1, 8     ; header.
- %alloc_size = trunc i64 %size.2 to i32
+ %size.2 = shl i64 %size.1, 1     ; align to 8 bytes (size * 8)
+ %size.3 = add i64 %size.2, 8     ; header.
+ %alloc_size = trunc i64 %size.3 to i32
  %obj = call i8* @gc_alloc(i32 %alloc_size)
  %obj.1 = bitcast i8* %obj to i64*
  %tag.1 = call i64 @raw-number(i64* %tag)
- %objtag.1 = or i64 %size.1, %tag.1
+ %objtag.1 = or i64 %size.2, %tag.1
  %objtag.2 = shl i64 %objtag.1, 1 ; forwarding/mark bit
  store i64 %objtag.2, i64* %obj.1
  %res = ptrtoint i8* %obj to i64
@@ -1006,11 +1019,11 @@ define i32 @main(i32 %argc, i8** %argv) {
      
      (llvm-define (string->symbol str)
                   (ensure (string? str) "string->symbol: not a string")                  
-                  (object-set! (mem-cpy str (allocate-object 3 2) 16) 2 1))
+                  (object-set! (mem-cpy str (allocate-object 3 2) 24) 2 1))
 
      (llvm-define (symbol->string sym)
                   (ensure (symbol? sym) "symbol->string: not a symbol")                  
-                  (object-set! (mem-cpy sym (allocate-object 3 2) 16) 2 0))
+                  (object-set! (mem-cpy sym (allocate-object 3 2) 24) 2 0))
 
      (llvm-define (list->string-helper str lst pos)
                   (cond ((null? lst) (string-set! str pos 0))

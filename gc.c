@@ -185,9 +185,7 @@ void gc_collect() {
 }
 
 uint8_t* gc_alloc(uint32_t size) {
-	// Add memory cell prefix
-	size += sizeof(uint64_t);
-
+	// Check remaining space
 	if (to_alloc + size - 1 > to_limit) {
 		// Garbage collection required
 #ifdef VERBOSE
