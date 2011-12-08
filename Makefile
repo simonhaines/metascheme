@@ -10,7 +10,7 @@ metascheme.bc:	metascheme.S
 	llvm-as -o metascheme.bc metascheme.S
 
 gc.o:	gc.c gc.h llvm_gc_support.h
-	gcc -DVERBOSE -fPIC -o gc.o -c gc.c
+	gcc -DVERBOSEX -fPIC -o gc.o -c gc.c
 
 db.o:	db.c db.h
 	gcc -fPIC -o db.o -c db.c

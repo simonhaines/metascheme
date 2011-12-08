@@ -45,7 +45,7 @@ void gc_init(uint32_t heapsize) {
 	}
 
 #ifdef VERBOSE
-	printf("Initialising heap (%d bytes)\n", heapsize);
+	fprintf(stderr, "Initialising heap (%d bytes)\n", heapsize);
 #endif
 
 	// Allocate heap space
@@ -66,17 +66,17 @@ void gc_init(uint32_t heapsize) {
 	}
 
 #ifdef VERBOSE
-	printf("  From space is: 0x%016lX .. 0x%016lX\n", (uint64_t) from_space,
-			(uint64_t) from_limit);
-	printf("    To space is: 0x%016lX .. 0x%016lX\n", (uint64_t) to_space,
-			(uint64_t) to_limit);
+	fprintf(stderr, "  From space is: 0x%016lX .. 0x%016lX\n",
+            (uint64_t) from_space, (uint64_t) from_limit);
+	fprintf(stderr, "    To space is: 0x%016lX .. 0x%016lX\n",
+            (uint64_t) to_space, (uint64_t) to_limit);
 #endif
 }
 
 void gc_shutdown() {
 #ifdef VERBOSE
-	printf("Releasing heap (%d of %d bytes in use)\n", to_alloc - to_space,
-			to_limit - to_space + 1);
+	fprintf(stderr, "Releasing heap (%d of %d bytes in use)\n",
+            to_alloc - to_space, to_limit - to_space + 1);
 #endif
 
 	free(from_space);
@@ -118,7 +118,7 @@ static void copy_and_forward(uint8_t *cell) {
 
 void gc_collect() {
 #ifdef VERBOSE
-	printf("Heap use before collection: %d of %d bytes\n",
+	fprintf(stderr, "Heap use before collection: %d of %d bytes\n",
 			to_alloc - to_space, to_limit - to_space + 1);
 #endif
 
@@ -189,7 +189,7 @@ uint8_t* gc_alloc(uint32_t size) {
 	if (to_alloc + size - 1 > to_limit) {
 		// Garbage collection required
 #ifdef VERBOSE
-		printf("Out of heap space, forcing collection\n");
+		fprintf(stderr, "Out of heap space, forcing collection\n");
 #endif
 		gc_collect();
 
@@ -206,8 +206,8 @@ uint8_t* gc_alloc(uint32_t size) {
 	to_alloc += size;
 
 #ifdef VERBOSE
-	printf("%d bytes allocated at 0x%016lX, heap size is now %d bytes\n",
-			size, memory, to_alloc - to_space);
+	fprintf(stderr, "%d bytes allocated at 0x%016lX, "
+            "heap size is now %d bytes\n", size, memory, to_alloc - to_space);
 #endif
 	return memory;
 }
