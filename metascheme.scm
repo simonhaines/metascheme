@@ -300,7 +300,7 @@
                 (c "; " (llvm-function-repr f-name))
                 (c "define i64 " (llvm-function-repr llvm-name)
                    "(" (build-params f-params) ") gc \"shadow-stack\" {")
-                (trace f-name f-params)  ; debug
+                ;(trace f-name f-params)  ; debug
                 f-body
                 (llvm-ret f-target)
                 (c "}")))))))
@@ -536,14 +536,15 @@
                           (car c-t-pos) (cdr c-t-pos)))))))
 
 (define (compile-assignment exp target c-t-env)
-  (display "compile-assignment: ")(write exp)(newline)
-  (display "c-t-env: ")(write c-t-env)(newline)(newline)
+  (display ";compile-assignment: ")(write exp)(newline)
+  (display ";c-t-env: ")(write c-t-env)(newline)
   (let ((c-t-pos (find-var (definition-variable exp) c-t-env 0))
         (t1 (make-stack-reg)))
     (if (null? c-t-pos) (error 'compile-assignment "not found")
+        (begin (display ";assigning to: ")(write c-t-pos)(newline)(newline)
 	(append-code
          (compile (definition-value exp) t1 c-t-env)
-         (llvm-call target 'set-variable! (construct-stack-reg 'env) (car c-t-pos) (cdr c-t-pos) t1)))))
+         (llvm-call target 'set-variable! (construct-stack-reg 'env) (car c-t-pos) (cdr c-t-pos) t1))))))
   
 (define (compile-if exp target c-t-env)
   (let ((c-branch (make-label))
@@ -643,18 +644,23 @@
      (lc target " = call i64 @make-number(i64 " target2 ")"))))
      
 
+; TODO move this near environment manipultors
+(define (top-level? env)
+  (eq? (length env) 1))
 (define (compile-provide exp target c-t-env)
-  (if (not (top-level? c-t-env)
-           (error 'compile-provide "not top level"))
-      (let ((c-t-pos (find ; TODO UPTOHERE
-  (display "c-t-env: ")(write c-t-env)(newline)
-  (display "llvm-function-names: ")(write llvm-primitive-functions)(newline)
-  (let ((c-t-pos (find-var exp c-t-env 0)))
-    (cond ((null? c-t-pos)
-           (error 'compile-provide "not found"))
-          ((not (eq? (car c-t-pos) c-t-env))
-           (error 'compile-provide "not top level"))
-          (#t (begin (display "c-t-pos: ")(write c-t-pos)(newline))))))
+  (display ";compile-provide")(newline)
+  (display ";c-t-env: ")(write c-t-env)(newline)
+  (display ";llvm-function-names: ")(write llvm-primitive-functions)(newline)
+  (if (not (top-level? c-t-env))
+      (error 'compile-provide "not top level"))
+      (let ((c-t-pos (find-var (first-arg exp) c-t-env 0)))
+        (if (null? c-t-pos)
+            (error (first-arg exp) "not found")
+            (begin
+              ; mark the compile-time position for export
+              (display ";c-t-pos: ") (write c-t-pos) (newline)
+              '()))))
+
 
 (define (compile-application exp target c-t-env)
   (define (build-param-list param-list operands index)
@@ -671,8 +677,11 @@
             (f-env (make-stack-reg))
             (f-nparams (make-stack-reg))
             (call-env (make-stack-reg))
-            (f-func (make-reg))
-            (func (make-reg)))
+
+; test then remove
+;            (f-func (make-reg))
+;            (func (make-reg)))
+)
         (append-code
          (compile (operator exp) proc c-t-env)
          (llvm-call f-env 'get-procedure-env proc)
@@ -680,6 +689,7 @@
          (build-param-list call-env (operands exp) 1)
          (llvm-call f-nparams 'get-procedure-nparams proc)
          (llvm-call (make-reg) 'fix-arbitrary-procs f-nparams call-env)
+         (trace "compile application" (list call-env))
          (llvm-call target 'apply-procedure proc call-env)))))
 
 (define (compile-llvm-application exp target c-t-env)
@@ -689,7 +699,7 @@
          (compile (car ops) (car t-vars) c-t-env)
          (operands-code (cdr ops) (cdr t-vars)))))
   
-  (let ((t-vars (map (lambda (operand) (make-stack-reg)) (operands exp))))        
+  (let ((t-vars (map (lambda (operand) (make-stack-reg)) (operands exp))))
     (append-code
      (operands-code (operands exp) t-vars)
      (llvm-call2 target (operator exp) t-vars))))
@@ -749,7 +759,7 @@ define void @bytearray-set(i8* %arr, i64 %index, i64 %value) {
 define i64 @make-procedure(i64 (i64*)* %raw-func, i64* %env, i64* %nparams) {
  %obj = call i8* @gc_alloc(i32 32)  ; 4 x 8-byte words
  %obj.1 = bitcast i8* %obj to i64*
- store i64 70, i64* %obj.1 ; size 8, tag 3, forward bit = 0
+ store i64 70, i64* %obj.1 ; size 8, tag 3, forward bit = 0 ;TODO wrong size!
 
  %ptr.1 = getelementptr i64* %obj.1, i32 1
  %raw-func.1 = ptrtoint i64 (i64*)* %raw-func to i64
@@ -1395,8 +1405,8 @@ define i32 @main(i32 %argc, i8** %argv) {
            llvm-function-list)
       (display "define i64 @startup(i64* %env) gc \"shadow-stack\" {\n")
       (map printer res)
-      (display (c ";ret i64\n" (llvm-repr target)))  ; Discard result
-      (display "  ret i32 0 \n}\n")
+      (display (c ";ret i64 " (llvm-repr target)))  ; Discard result
+      (display "\n  ret i64 0 \n}\n")
     'ok)))
 
 (define (ccomp exp)

@@ -20,6 +20,10 @@ void db_trace_vector(uint64_t ref) {
 		uint64_t tag = header & 0x03;
 		uint64_t size = raw_number(header);
 		fprintf(stderr, "[%lu] %lu %016lX\n", size, tag, target);
+		for (uint64_t index = 0; index < size; ++index) {
+			fprintf(stderr, "  [%lu]", index);
+			db_trace_param(heap + 4 + (index * 4));
+		}
 	}
 	return;
 }

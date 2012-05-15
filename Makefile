@@ -13,10 +13,10 @@ gc.o:	gc.c gc.h llvm_gc_support.h
 	gcc -DVERBOSEX -fPIC -o gc.o -c gc.c
 
 db.o:	db.c db.h
-	gcc -fPIC -o db.o -c db.c
+	gcc -std=c99 -fPIC -o db.o -c db.c
 
 rt.so:	gc.o db.o
-	gcc -shared -o rt.so gc.o db.o
+	gcc -std=c99 -shared -o rt.so gc.o db.o
 
 clean:
 	rm metascheme.S metascheme.bc rt.so gc.o db.o

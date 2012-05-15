@@ -515,19 +515,34 @@ Also see [[AdvancedOptions]]</pre>
 
 All the bootstrap functions define before the 'Primitive scheme functions' section can only be called by the primitive scheme functions and they have varying argument and return types.</pre>
 </div>
-<div title="Separate Compilation" creator="SimonHaines" modifier="SimonHaines" created="201205140608" modified="201205140609" tags="libraries compiler" changecount="2">
-<pre>Process for separate compilation:
+<div title="Separate compilation" creator="SimonHaines" modifier="SimonHaines" created="201205140608" modified="201205150545" tags="libraries compiler architecture" changecount="4">
+<pre>The strategy for separate compilation is:
 
-For each 'provide' statement, lookup the symbol in the top-level environment (only) to resolve a definition
-Register the function corresponding to the definition in an export table
-After compilation, print out the export table and the init-generators
+When compiling a library form (ony at top level):
+1. Compile the library statements keeping track of the exported symbols.
+2. At the end of compiling the library form, generate (in LLVM) an entrypoint function (maybe of the library's name) that returns an environment with all exported symbols bound using the function (llvm-call target 'lookup-variable ...).
+3. Save the list of exported symbols somewhere(??)
 
-Provide can only be used at the top level. Maybe enforce this in a library form? How to ensure top level?</pre>
+When importing a library
+1. Load the list of exported symbols from somewhere(??)
+2. Extend the compile-time environment with the list of (renamed or subset) symbols
+3. Generate (in LLVM) a call to library's entrypoint, producing an environment with the library's exported symbols
+4. Generate code to lookup the required values (again using 'lookup-variable) from the library's environment to the current run-time environment</pre>
 </div>
 <div title="SiteTitle" creator="SimonHaines" modifier="SimonHaines" created="201205140608" changecount="1">
 <pre>MetaScheme</pre>
 </div>
-<div title="compile-sequence" creator="SimonHaines" modifier="SimonHaines" created="201205140625" modified="201205140659" tags="compiler compiler-function" changecount="2">
+<div title="compile-application" creator="SimonHaines" modifier="SimonHaines" created="201205150031" modified="201205150241" tags="compiler compiler-function" changecount="2">
+<pre>This function generates code for applying a combination at run-time.
+
+If the operatgor of the combination is a llvm function (a member of llvm-primitive-functions), code is generated via *compile-llvm-application*.
+
+Otherwise, stack registers are generated for: the llvm function containing the code of the operator *proc*, the procedure environment *f-env* (names bound at the time of procedure definition, the first slot of a run-time procedure object), the number of parameters (operands), and the call environment *call-env* (a new environment chained to f-env extended with slots for the combination's operands).
+
+Instruction generation
+It then generates instructions to compile the operator to the *proc* register (operators that are variables are looked up in the compile-time environment with *find-var*), retrieve the procedure environment from the object in the *proc* register and store it in the *f-env* register, compile the operands (parameter list) into the *call-env* register, do some fixup for arbitrary parameters, then compiles instructions to call the llvm function 'apply-procedure.</pre>
+</div>
+<div title="compile-sequence" creator="SimonHaines" modifier="SimonHaines" created="201205140625" modified="201205150105" tags="compiler compiler-function" changecount="3">
 <pre>This function compiles sequences of scheme combinations, such as those in 'begin' forms, bodies of lambda functions, and bodies of let sequences. Its parameters are the expression to compile, a target llvm register, and the scoped compile-time environment
 
 It first calls its internal function *sequence-defines* which walks the expression looking for either definition forms (lists tagged 'define) or llvm-definition forms (lists tagged 'llvm-define, note you can't call set! on undefined variables). For 'define forms, it gathers the name of the definition into a list using *definition-variable* to get the name of the definition. This handles both (define value 1) and (define (value x y x) ...) forms.
@@ -538,7 +553,18 @@ If any internal definitions were found, a new llvm target register is made, the 
 
 How sequences are compiled
 The guts of sequence compilation is done in *append-sequences* which takes an expression (the sequence), the target llvm register, the code already compiled and the compile-time environment.
-If there is only one expression left in the sequence (last-exp? seq), the expression is compiled to the target register, otherwise, a new target register is make, the first expression in the sequence is compiled to it, and the function recurses until there is only one expression left and the result is the code already compiled (code-seq).</pre>
+If there is only one expression left in the sequence (last-exp? seq), the expression is compiled to the target register, otherwise, a new target register is make, the first expression in the sequence is compiled to it, and the function recurses until there is only one expression left and the result is the code already compiled (code-seq).
+
+Variables are looked up in the compile-time environment (which, remember, is extended with the other define forms in the same scope).</pre>
+</div>
+<div title="compile-variable" creator="SimonHaines" modifier="SimonHaines" created="201205150241" modified="201205150550" tags="compiler compiler-function" changecount="2">
+<pre>This function resolves variables in the run-time environment.
+
+First it checks if the environment is a LLVM function, ...
+
+Otherwise, it looks up the variable in the compile-time environment and gets the scope index and offset index of the variable's value. It then generates instructions to call the LLVM function 'lookup-variable with the target as a LLVM stack register named 'reg, the scope and the index.
+
+The 'lookup variable function simply takes the scope and index offsets and returns the value at that position in the environment vector.</pre>
 </div>
 </div>
 <!--POST-STOREAREA-->
