@@ -1,6 +1,6 @@
 SCHEME=guile
 
-all:	all-c
+all:	test-c
 
 all-c:	compile.ccode.c
 	gcc -Wall -o metascheme compile.ccode.c
@@ -10,6 +10,7 @@ compile.ccode.c:	compile.ccode.ss
 
 test-c:	test.scm
 	cat test.scm | ${SCHEME} compile.ccode.ss >test.c
+	gcc -Wall -o test-c test.c
 
 all-llvm:	metascheme.bc rt.so
 	lli -load=./rt.so metascheme.bc
@@ -30,5 +31,5 @@ rt.so:	gc.o db.o
 	gcc -std=c99 -shared -o rt.so gc.o db.o
 
 clean:
-	rm -f compile.ccode.c test.c metascheme
+	rm -f compile.ccode.c metascheme test.c test-c
 	rm -f metascheme.S metascheme.bc rt.so gc.o db.o
