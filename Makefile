@@ -1,7 +1,7 @@
 SCHEME=guile
 
 all:	metascheme.bc rt.so
-	lli -load=./rt.so metascheme.bc
+	lli -load=./rt.so bootstrap.llvm.bc metascheme.bc
 
 metascheme.S:	metascheme.scm
 	${SCHEME} metascheme.scm >metascheme.S
