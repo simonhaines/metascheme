@@ -183,17 +183,18 @@
           exit))
   (set! llvm-function-map
     '(; Support functions
-      (allocate-bytearray . allocate-bytearray)
-      (bytearray-ref . bytearray-ref)
-      (bytearray-set! . bytearray-set)
-      (make-procedure . make-procedure)
-      (make-string/symbol . make-string-or-symbol)
-      (string-bytes . string-bytes)
-      (clear-tag . clear-tag)
-      (make-number . make-number)
-      (raw-number . raw-number)
-      (points-to . points-to)
-      (tag-eq? . tag-eq)
+; TODO test then remove
+;      (allocate-bytearray . allocate-bytearray)
+;      (bytearray-ref . bytearray-ref)
+;      (bytearray-set! . bytearray-set)
+;      (make-procedure . make-procedure)
+;      (make-string/symbol . make-string-or-symbol)
+;      (string-bytes . string-bytes)
+;      (clear-tag . clear-tag)
+;      (make-number . make-number)
+;      (raw-number . raw-number)
+;      (points-to . points-to)
+;      (tag-eq? . tag-eq)
       ; Primitive scheme functions
       (trace-var . trace-var)  ; Debug
       (llvm-read-char . llvm-read-char)
@@ -1428,7 +1429,11 @@ define i32 @main(i32 %argc, i8** %argv) {
             (display 42) (newline)
             (display (cons 1 2)) (newline)
             (display 'symbol) (newline)
-            (display (quote (1 2 3 4))) (newline)))
+            (display (quote (1 2 3 4))) (newline)
+            (define (fib n)
+              (if (< n 2) n
+                  (+ (fib (- n 1)) (fib (- n 2)))))
+            (display (fib 10))))
 
 ;(compiler '((display (vector-ref (vector-set! (allocate-object 2 1) 1 42) 1))))
 ;(compiler '((if (cmpeq (object-ref (object-set! (allocate-object 2 1) 1 42) 1) 42) (print-string/symbol "foo") (print-string/symbol "bar"))))
