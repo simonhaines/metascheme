@@ -168,12 +168,12 @@
 (define (add-c-function f-name f-params f-body)
   (define (build-params params)
     (if (null? params) ""
-        (c "uint* " (car params) (if (null? (cdr params)) "" ", ")
+        (c "size_t* " (car params) (if (null? (cdr params)) "" ", ")
            (build-params (cdr params)))))
   (set! c-function-list
     (append c-function-list
 	    (list (append-code 
-		   (c "uint " f-name "(" (build-params f-params) ") {")
+		   (c "size_t " f-name "(" (build-params f-params) ") {")
 		   (c "function_prolog(" (number->string local-counter)
 		      ", \"" f-name "\");")
 		   f-body
@@ -410,8 +410,8 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef unsigned int uint;
-uint gc_allocate(uint size);
+#define uint unsigned int
+size_t gc_allocate(unsigned int size);
 
 /* 2 low bits used as type information:
    00 - number
@@ -419,107 +419,107 @@ uint gc_allocate(uint size);
    10 - string/symbol
    11 - procedure */
 
-uint make_number(uint val) { return val << 2; }
-uint raw_number(uint* x) { return (*x) >> 2; }
-uint* points_to(uint* x) { return (uint*) ((*x >> 2) << 2); }
-char* string_bytes(uint* str) { return (char*) (points_to(str)[1]); }
-uint tag_eqP(uint* x, uint tag) { return (*x & 0x3) == tag ? 4 : 0; }
+size_t make_number(size_t val) { return val << 2; }
+size_t raw_number(size_t* x) { return (*x) >> 2; }
+size_t* points_to(size_t* x) { return (size_t*) ((*x >> 2) << 2); }
+char* string_bytes(size_t* str) { return (char*) (points_to(str)[1]); }
+size_t tag_eqP(size_t* x, size_t tag) { return (*x & 0x3) == tag ? 4 : 0; }
 
-uint allocate_bytearray(uint* size) { return (uint) malloc(raw_number(size)); }
-uint bytearray_ref(char* arr, uint index) { return make_number(arr[index]); }
-void bytearray_set1(char* arr, uint index, uint value) { arr[index] = value; }
+size_t allocate_bytearray(size_t* size) { return (size_t) malloc(raw_number(size)); }
+size_t bytearray_ref(char* arr, size_t index) { return make_number(arr[index]); }
+void bytearray_set1(char* arr, size_t index, size_t value) { arr[index] = value; }
 
-uint make_procedure(uint (*raw_func)(uint*) , uint* env, uint* nparams) {
- uint* obj = (uint*) gc_allocate(16);
+size_t make_procedure(size_t (*raw_func)(size_t*) , size_t* env, size_t* nparams) {
+ size_t* obj = (size_t*) gc_allocate(16);
  obj[0] = 30; // size 4, tag 3, forward bit 0
- obj[1] = (uint) raw_func;
+ obj[1] = (size_t) raw_func;
  obj[2] = *env;
  obj[3] = *nparams;
- return ((uint) obj) | 0x3;
+ return ((size_t) obj) | 0x3;
 }
-uint make_stringSsymbol(char* raw_str, uint size, uint symbolp) {
- uint* obj = (uint*) gc_allocate(16);
+size_t make_stringSsymbol(char* raw_str, size_t size, size_t symbolp) {
+ size_t* obj = (size_t*) gc_allocate(16);
  obj[0] = 28; // size 4, tag 2, forward bit 0
- obj[1] = (uint) raw_str;
+ obj[1] = (size_t) raw_str;
  obj[2] = size;
  obj[3] = symbolp;
- return ((uint) obj) | 0x2;
+ return ((size_t) obj) | 0x2;
 }
 
 // garbage collection forwarding
-void set_forward(uint* x, uint* to) { *points_to(x) = ((uint) to) | 0x1; }
-uint forwarded(uint* x) { return (*points_to(x) & 0x1) ? 4 : 0; }
+void set_forward(size_t* x, size_t* to) { *points_to(x) = ((size_t) to) | 0x1; }
+size_t forwarded(size_t* x) { return (*points_to(x) & 0x1) ? 4 : 0; }
 
 // -- Primitive scheme functions --
-uint c_read_char() { return make_number(getchar()); }
+size_t c_read_char() { return make_number(getchar()); }
 void stack_trace();
-uint c_exit() { stack_trace(); exit(0); return 0; }
+size_t c_exit() { stack_trace(); exit(0); return 0; }
 
-uint print_number(uint* format, uint* value) {
+size_t print_number(size_t* format, size_t* value) {
  printf(string_bytes(format), raw_number(value));
  return 4;
 }
-uint print_stringSsymbol(uint* str) {
+size_t print_stringSsymbol(size_t* str) {
  printf(\"%s\", string_bytes(str));
  return 4;
 }
 
-uint allocate_object(uint* size, uint* tag) {
- uint* obj = (uint*) gc_allocate(*size + 4); // loading number gives size * 4.
+size_t allocate_object(size_t* size, size_t* tag) {
+ size_t* obj = (size_t*) gc_allocate(*size + 4); // loading number gives size * 4.
  *obj = (*size | raw_number(tag)) << 1;
- return ((uint) obj) | raw_number(tag);
+ return ((size_t) obj) | raw_number(tag);
 }
-uint object_size(uint* x) { return (*points_to(x) >> 3) << 2; }
-uint object_ref_raw(uint *obj, uint raw_index) {
+size_t object_size(size_t* x) { return (*points_to(x) >> 3) << 2; }
+size_t object_ref_raw(size_t *obj, size_t raw_index) {
  return points_to(obj)[raw_index + 1]; 
 }
-uint object_ref(uint* obj, uint* index) {
+size_t object_ref(size_t* obj, size_t* index) {
  return object_ref_raw(obj, raw_number(index));
 }
-uint object_set1_raw(uint* obj, uint raw_index, uint* value) {
+size_t object_set1_raw(size_t* obj, size_t raw_index, size_t* value) {
  points_to(obj)[raw_index + 1] = *value;
  return *obj; 
 }
-uint object_set1(uint* obj, uint* index, uint* value) {
+size_t object_set1(size_t* obj, size_t* index, size_t* value) {
  return object_set1_raw(obj, raw_number(index), value);
 }
 
-uint allocate_stringSsymbol(uint* size, uint* symbolp) {
+size_t allocate_stringSsymbol(size_t* size, size_t* symbolp) {
  return make_stringSsymbol((char*)allocate_bytearray(size), *size, *symbolp);
 }
-uint string_ref(uint* str, uint* index) {
+size_t string_ref(size_t* str, size_t* index) {
  return bytearray_ref(string_bytes(str), raw_number(index));
 }
-uint string_set1(uint* str, uint* index, uint* value) {
+size_t string_set1(size_t* str, size_t* index, size_t* value) {
  bytearray_set1(string_bytes(str), raw_number(index), raw_number(value));
  return *str;
 }
 
-uint mem_cpy(uint* src, uint* dst, uint* size) {
+size_t mem_cpy(size_t* src, size_t* dst, size_t* size) {
  memcpy(points_to(dst), points_to(src), raw_number(size));
  return *dst;
 }
 
-uint apply_procedure(uint* proc, uint* callenv) {
- return ((uint (*)(uint*)) points_to(proc)[1])(callenv);
+size_t apply_procedure(size_t* proc, size_t* callenv) {
+ return ((size_t (*)(size_t*)) points_to(proc)[1])(callenv);
 }
 
-uint numberP(uint* x) { return tag_eqP(x, 0); }
-uint vectorP(uint* x) { return tag_eqP(x, 1); }
-uint stringSsymbolP(uint* x) { return tag_eqP(x, 2); }
-uint procedureP(uint* x) { return tag_eqP(x, 3); }
-uint nullP(uint* x) { return (*x == 1) ? 4 : 0; }
-uint make_null() { return 1;}
-uint make_true() { return 4;}
+size_t numberP(size_t* x) { return tag_eqP(x, 0); }
+size_t vectorP(size_t* x) { return tag_eqP(x, 1); }
+size_t stringSsymbolP(size_t* x) { return tag_eqP(x, 2); }
+size_t procedureP(size_t* x) { return tag_eqP(x, 3); }
+size_t nullP(size_t* x) { return (*x == 1) ? 4 : 0; }
+size_t make_null() { return 1;}
+size_t make_true() { return 4;}
 
 // variable lookup/assignment
-uint lookup_variable(uint *env, uint scope, uint index) {
- uint e = *env;
+size_t lookup_variable(size_t *env, size_t scope, size_t index) {
+ size_t e = *env;
  for(;scope > 0; scope--, e = object_ref_raw(&e, 0));
  return object_ref_raw(&e, index);
 }
-uint set_variable1(uint *env, uint scope, uint index, uint* value) {
- uint e = *env;
+size_t set_variable1(size_t *env, size_t scope, size_t index, size_t* value) {
+ size_t e = *env;
  for(;scope > 0; scope--, e = object_ref_raw(&e, 0));
  return object_set1_raw(&e, index, value);
 }
@@ -538,12 +538,12 @@ void gc_initialize(uint heap_size) {
  gc_to_space = calloc(1, gc_space_size);
  gc_alloc_end = gc_alloc_ptr + gc_space_size;
 
- if(((uint) gc_cur_space) & 0x3 != 0 || ((uint) gc_to_space) & 0x3 != 0) {
+ if(((size_t)gc_cur_space & 0x3) != 0 || ((size_t)gc_to_space & 0x3) != 0) {
    printf(\"memory not aligned\\n\"); exit(1);
  }
 }
 
-uint gc_allocate(uint size) {
+size_t gc_allocate(uint size) {
  char *old_aptr = gc_alloc_ptr;
  char *new_aptr = gc_alloc_ptr + size;
  if(new_aptr > gc_alloc_end) {
@@ -558,46 +558,46 @@ uint gc_allocate(uint size) {
   return gc_allocate(size);
  }
  gc_alloc_ptr = new_aptr;
- return (uint) old_aptr;
+ return (size_t) old_aptr;
 }
 
 #define function_prolog(vnum, fname) \\
-  uint var[vnum]; memset(var, 0, sizeof(uint) * vnum); \\
-  var[0] = (uint) frame_stack;var[1] = vnum;var[2] = (uint) fname; \\
+  size_t var[vnum]; memset(var, 0, sizeof(size_t) * vnum); \\
+  var[0] = (size_t) frame_stack;var[1] = vnum;var[2] = (size_t) fname; \\
   frame_stack = var;
-#define function_epilog() frame_stack = (uint*) var[0]; return var[3];
-uint* frame_stack = NULL;
+#define function_epilog() frame_stack = (size_t*) var[0]; return var[3];
+size_t* frame_stack = NULL;
 
 static char *gc_scan;
 static char *gc_free;
 
-void gc_walk_roots(void (*callback)(uint*)) {
- uint *fs, *v;
- for(fs = frame_stack;fs;fs = (uint*)fs[0])
+void gc_walk_roots(void (*callback)(size_t*)) {
+ size_t *fs, *v;
+ for(fs = frame_stack;fs;fs = (size_t*)fs[0])
   for(v = &fs[3]; v < &fs[fs[1]]; v++)
    callback(v);
 }
 
 void stack_trace() {
- uint *fs, *v, i;
- for(fs = frame_stack;fs;fs = (uint*)fs[0])
+ size_t *fs;
+ for(fs = frame_stack;fs;fs = (size_t*)fs[0])
   printf(\"trace: %s\\n\", (char*)fs[2]);
 }
 
 // Cheney collector 
 // (C. J. Cheney. 1970. A non-recursive list compacting algorithm.)
-static void gc_copy_forward(uint* cell) {
- uint tag = *cell & 0x3;
+static void gc_copy_forward(size_t* cell) {
+ size_t tag = *cell & 0x3;
  if(tag == 0) { return; } // number -> ignore  
- uint* obj = points_to(cell);       
+ size_t* obj = points_to(cell);       
  if(obj == 0) { return; } // null pointer -> ignore
  if (forwarded(cell)) { // update pointer with forwarding info
-  *cell = ((uint) points_to(obj)) | tag; 
+  *cell = ((size_t) points_to(obj)) | tag; 
  } else { // copy and forward object
-  uint size = object_size(cell) + 4;
+  size_t size = object_size(cell) + 4;
   memcpy(gc_free, obj, size);
-  set_forward(cell, (uint*) gc_free);
-  *cell = ((uint) gc_free) | tag;
+  set_forward(cell, (size_t*) gc_free);
+  *cell = ((size_t) gc_free) | tag;
   gc_free += size;
  }
 }
@@ -609,15 +609,15 @@ void gc_collect() {
  gc_walk_roots(gc_copy_forward);
 
  while(gc_scan < gc_free) {
-  uint* obj = (uint *) gc_scan;
-  uint tag = (*obj >> 1) & 0x3;
+  size_t* obj = (size_t *) gc_scan;
+  size_t tag = (*obj >> 1) & 0x3;
   switch(tag) {
    case 0:
-        printf(\"scan incorrect, unboxed type.\\n\"); *((uint*)0) = 0;
+        printf(\"scan incorrect, unboxed type.\\n\"); *((size_t*)0) = 0;
         break;
    case 1: // vector
         {
-         uint i, size = *obj >> 3; // printf(\"scan vector %u\\n\", size);
+         size_t i, size = *obj >> 3; // printf(\"scan vector %u\\n\", size);
          for(i = 0; i < size; i++)
           gc_copy_forward(&obj[i+1]);
          gc_scan += (size + 1) * 4; // 32 bits.
@@ -641,11 +641,11 @@ void gc_collect() {
 }
 
 // -- Bootstrap code --
-uint startup(uint* env);
-int main(int argc, uint** argv) {
+size_t startup(size_t* env);
+int main(int argc, char **argv) {
   gc_initialize(40000);
-  uint env = 0;
-  return startup(&env);
+  size_t env = 0;
+  return (int)startup(&env);
 }
 
 // -- Autogenerated code --
