@@ -13,12 +13,14 @@ DEFINES += SCHEME_LIBRARY
 
 SOURCES += scheme.cpp \
     engine.cpp \
-    value.cpp
+    value.cpp \
+    number.cpp
 
 HEADERS += scheme.h\
         scheme_global.h \
     engine.h \
-    value.h
+    value.h \
+    number.h
 
 symbian {
     MMP_RULES += EXPORTUNFROZEN
@@ -38,6 +40,10 @@ unix:!symbian {
     }
     INSTALLS += target
 }
+
+
+
+
 
 
 
