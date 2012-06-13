@@ -7,7 +7,7 @@
 
 namespace scheme
 {
-	class Value // 'pointer' in TinyScheme
+	class Value // 'pointer' in TinyScheme, should be part of the memory namespace
     {
     public:
 		enum Type {
@@ -20,7 +20,7 @@ namespace scheme
 		virtual ~Value();
 		void clear();
 
-        // Type inspection
+		// Type inspection
 		bool isCharacter() const;
 		bool isClosure() const;
 		bool isContinuation() const;

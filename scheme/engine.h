@@ -1,6 +1,8 @@
 #ifndef ENGINE_H
 #define ENGINE_H
 
+#include <QStack>
+
 #include "value.h"
 
 namespace scheme
@@ -22,6 +24,9 @@ namespace scheme
 
 		void collectGarbage();
 
+	private:
+		struct StackFrame;
+		QStack<StackFrame> stack_;
 	};
 }
 
