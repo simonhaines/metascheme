@@ -40,7 +40,7 @@ Number Number::divide(const Number &other) const {
     result.isFixed_ = isFixed_ && other.isFixed_
                     && (fixed_ % other.fixed_ == 0);
     if (result.isFixed_) {
-            result.fixed_ = fixed_ / other_.fixed;
+			result.fixed_ = fixed_ / other.fixed_;
     } else {
             result.real_ = toReal() / other.toReal();
     }
@@ -88,9 +88,9 @@ Number Number::remainder(const Number &other) const {
 
 bool Number::isEqualTo(const Number &other) const {
     if (isFixed_ && other.isFixed_) {
-        return fixed_ > other.fixed_;
+		return fixed_ == other.fixed_;
     } else {
-        return toReal() > other.toReal();
+		return toReal() == other.toReal();
     }
 }
 

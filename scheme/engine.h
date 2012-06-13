@@ -22,9 +22,6 @@ namespace scheme
 
 		void collectGarbage();
 
-	private:
-		Q_DECLARE_PRIVATE(Engine)
-
 	};
 }
 

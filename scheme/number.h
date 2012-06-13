@@ -6,7 +6,6 @@
 namespace scheme
 {
     class Number {
-        Q_OBJECT
 
     public:
         Number();
