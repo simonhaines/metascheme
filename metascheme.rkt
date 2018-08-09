@@ -1,3 +1,4 @@
+#lang racket/base
 ;; A small self applicable scheme->llvm compiler.
 ;; ,  Tobias Nurmiranta
 ;;
@@ -230,7 +231,7 @@
 
 (define (stack-reg? exp) (or (tagged-list? exp 'stack-reg) (tagged-list? exp 'stack-reg-not-used)))
 (define (stack-reg-used? exp) (tagged-list? exp 'stack-reg))
-(define (set-stack-reg-used! sreg) (set-car! sreg 'stack-reg))
+(define (set-stack-reg-used! sreg) (set! sreg (list 'stack-reg (cdr sreg))))
 (define (construct-stack-reg reg-name) (list 'stack-reg reg-name))
 
 (define (convert-to-stack-reg exp) (list 'convert-to-stack-reg exp))
@@ -653,14 +654,14 @@
   (display ";c-t-env: ")(write c-t-env)(newline)
   (display ";llvm-function-names: ")(write llvm-primitive-functions)(newline)
   (if (not (top-level? c-t-env))
-      (error 'compile-provide "not top level"))
+      (error 'compile-provide "not top level")
       (let ((c-t-pos (find-var (first-arg exp) c-t-env 0)))
         (if (null? c-t-pos)
             (error (first-arg exp) "not found")
             (begin
               ; mark the compile-time position for export
               (display ";c-t-pos: ") (write c-t-pos) (newline)
-              '()))))
+              '())))))
 
 
 (define (compile-application exp target c-t-env)
