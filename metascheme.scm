@@ -1,4 +1,3 @@
-#lang racket/base
 ;; A small self applicable scheme->llvm compiler.
 ;; ,  Tobias Nurmiranta
 ;;
@@ -231,7 +230,7 @@
 
 (define (stack-reg? exp) (or (tagged-list? exp 'stack-reg) (tagged-list? exp 'stack-reg-not-used)))
 (define (stack-reg-used? exp) (tagged-list? exp 'stack-reg))
-(define (set-stack-reg-used! sreg) (set! sreg (list 'stack-reg (cdr sreg))))
+(define (set-stack-reg-used! sreg) (set-car! sreg 'stack-reg))
 (define (construct-stack-reg reg-name) (list 'stack-reg reg-name))
 
 (define (convert-to-stack-reg exp) (list 'convert-to-stack-reg exp))
@@ -283,7 +282,7 @@
     (append-code
       (llvm-bitcast (llvm-repr target)
                     (add-llvm-string global str) global "i8*")
-      (c "call void(i8*, i32, ...) @db_trace(i8* " (llvm-repr target) ", "
+      (c "call void(i8*, i32, ...)* @db_trace(i8* " (llvm-repr target) ", "
          "i32 " (number->string (length params))
          (build-params params) ")"))))
 
@@ -654,14 +653,14 @@
   (display ";c-t-env: ")(write c-t-env)(newline)
   (display ";llvm-function-names: ")(write llvm-primitive-functions)(newline)
   (if (not (top-level? c-t-env))
-      (error 'compile-provide "not top level")
+      (error 'compile-provide "not top level"))
       (let ((c-t-pos (find-var (first-arg exp) c-t-env 0)))
         (if (null? c-t-pos)
             (error (first-arg exp) "not found")
             (begin
               ; mark the compile-time position for export
               (display ";c-t-pos: ") (write c-t-pos) (newline)
-              '())))))
+              '()))))
 
 
 (define (compile-application exp target c-t-env)
@@ -705,317 +704,6 @@
     (append-code
      (operands-code (operands exp) t-vars)
      (llvm-call2 target (operator exp) t-vars))))
-
-(define bootstrap-llvm-code
-";implementation
-declare i32 @printf(i8*, ...)
-declare void @exit(i32)
-declare i32 @getchar()
-declare void @llvm.memcpy(i8*, i8*, i32, i32)
-
-declare void @gc_init(i32)
-declare i8* @gc_alloc(i32)
-
-declare void @llvm.gcroot(i8**, i8*)
-;declare void @llvm.gcwrite(i8*, i8*, i8**)
-
-; Startup
-declare i64 @startup(i64*)
-
-; Debug
-declare void @db_trace(i8*, i32, ...)
-
-;; Support functions
-
-; Debug
-define i64 @trace-var(i64* %msg, i64* %param) {
-  %bytes = call i8* @string-bytes(i64* %msg)
-  call void(i8*, i32, ...) @db_trace(i8* %bytes, i32 1, i64* %param)
-  ret i64 0
-}
-
-define i64 @allocate-bytearray(i64* %size) {
-  %size.1 = call i64 @raw-number(i64* %size)
-  %size.2 = trunc i64 %size.1 to i32
-  %res = malloc i8, i32 %size.2
-  store i8 0, i8* %res  ; String sentinel
-  %res.1 = ptrtoint i8* %res to i64
-  ret i64 %res.1
-}
-
-define i64 @bytearray-ref(i8* %arr, i64 %index) {
-  %ptr = getelementptr i8* %arr, i64 %index
-  %res = load i8* %ptr
-  %res2 = zext i8 %res to i64
-  %res3 = call i64 @make-number(i64 %res2)
-  ret i64 %res3
-}
-
-define void @bytearray-set(i8* %arr, i64 %index, i64 %value) {
- %ptr = getelementptr i8* %arr, i64 %index
- %value.1 = trunc i64 %value to i8
- store i8 %value.1, i8* %ptr
- ret void
-}
-
-define i64 @make-procedure(i64 (i64*)* %raw-func, i64* %env, i64* %nparams) {
- %obj = call i8* @gc_alloc(i32 32)  ; 4 x 8-byte words
- %obj.1 = bitcast i8* %obj to i64*
- store i64 70, i64* %obj.1 ; size 8, tag 3, forward bit = 0 ;TODO wrong size!
-
- %ptr.1 = getelementptr i64* %obj.1, i32 1
- %raw-func.1 = ptrtoint i64 (i64*)* %raw-func to i64
- store i64 %raw-func.1, i64* %ptr.1
-
- %ptr.2 = getelementptr i64* %obj.1, i32 2
- %env.1 = load i64* %env
- store i64 %env.1, i64* %ptr.2
-
- %ptr.3 = getelementptr i64* %obj.1, i32 3
- %nparams.1 = load i64* %nparams
- store i64 %nparams.1, i64* %ptr.3
-
- %res = ptrtoint i8* %obj to i64
- %res.1 = or i64 %res, 3 ; tag 3, procedure. 
- ret i64 %res.1
-}
-
-define i64 @make-string-or-symbol(i64 %raw-str, i64* %size, i64* %symbolp) {
- %obj = call i8* @gc_alloc(i32 32)  ; 4 x 8-byte words
- %obj.1 = bitcast i8* %obj to i64*
- store i64 68, i64* %obj.1 ; size 8, tag 2, forward bit = 0
-
- %ptr.1 = getelementptr i64* %obj.1, i32 1
- store i64 %raw-str, i64* %ptr.1
-
- %ptr.2 = getelementptr i64* %obj.1, i32 2
- %size.1 = load i64* %size
- store i64 %size.1, i64* %ptr.2
-
- %ptr.3 = getelementptr i64* %obj.1, i32 3
- %symbolp.1 = load i64* %symbolp
- store i64 %symbolp.1, i64* %ptr.3
-
- %res = ptrtoint i8* %obj to i64
- %res.1 = or i64 %res, 2 ; tag 2, string/symbol. 
- ret i64 %res.1
-}
-
-define i8* @string-bytes(i64* %str) {
- %str.1 = call i64* @points-to(i64* %str)
- %str.2 = getelementptr i64* %str.1, i32 1
- %bytes = load i64* %str.2
- %bytes.2 = inttoptr i64 %bytes to i8*
- ret i8* %bytes.2
-}
-
-define i64 @clear-tag(i64* %x) {
- %x.1 = load i64* %x
- %x.2 = lshr i64 %x.1, 2
- %x.3 = shl i64 %x.2, 2
- ret i64 %x.3
-}
- 
-define i64 @make-number(i64 %val) {
- %res = shl i64 %val, 2
- ret i64 %res
-}
-
-define i64 @raw-number(i64* %x) {
- %raw = load i64* %x
- %raw.1 = lshr i64 %raw, 2
- ret i64 %raw.1
-}
-
-define i64* @points-to(i64* %x) {
- %x.1 = load i64* %x
- %x.2 = lshr i64 %x.1, 2
- %x.3 = shl i64 %x.2, 2
- %ptr.1 = inttoptr i64 %x.3 to i64*
- ret i64* %ptr.1
-}
-
-define i64 @tag-eq(i64* %x, i64 %tag) {  ; SH tag argument can be i32
- %x.1 = load i64* %x
- %tag.1 = and i64 %x.1, 3
- %bool = icmp eq i64 %tag.1, %tag
- br i1 %bool, label %eq, label %noteq
-eq:
- ret i64 4 ; number 1
-noteq:
- ret i64 0 ; number 0
-}
-
-;; Primitive scheme functions
-
-define i64 @llvm-read-char() {
-  %res = call i32 @getchar()
-  %res.1 = zext i32 %res to i64
-  %res.2 = call i64 @make-number(i64 %res.1)
-  ret i64 %res.1
-}
-
-define i64 @print-number(i64* %format, i64* %value) {
-  %format.2 = call i8* @string-bytes(i64* %format)
-  %number = call i64 @raw-number(i64* %value) 
-  call i32 (i8*, ...)* @printf(i8* %format.2, i64 %number)
-  ret i64 0
-}
-
-define i64 @print-string-or-symbol(i64* %str) {
-  %str.2 = call i8* @string-bytes(i64* %str)
-  call i32 (i8*, ...)* @printf(i8* %str.2)
-  ret i64 0
-}
-
-@trace-allocate-object = private unnamed_addr constant [16 x i8] c\"allocate-object\\00\"
-define i64 @allocate-object(i64* %size, i64* %tag) {
- %str-reg = bitcast [16 x i8]* @trace-allocate-object to i8*
- call void(i8*, i32, ...) @db_trace(i8* %str-reg, i32 2, i64* %size, i64* %tag)
-
- %size.1 = load i64* %size        ; loading number gives size * 4.
- %alloc_size.1 = shl i64 %size.1, 1     ; align to 8 bytes (size * 8)
- %alloc_size.2 = add i64 %alloc_size.1, 8     ; header.
- %alloc_size.3 = trunc i64 %alloc_size.2 to i32
- %obj = call i8* @gc_alloc(i32 %alloc_size.3)
- %obj.1 = bitcast i8* %obj to i64*
- %tag.1 = call i64 @raw-number(i64* %tag)
- %objtag.1 = or i64 %size.1, %tag.1
- %objtag.2 = shl i64 %objtag.1, 1 ; forwarding/mark bit
- store i64 %objtag.2, i64* %obj.1
- %res = ptrtoint i8* %obj to i64
- %res.1 = or i64 %res, %tag.1     ; type tag.
- ret i64 %res.1
-}
-
-define i64 @object-size(i64* %x) {
- %ptr = call i64* @points-to(i64* %x)
- %size = load i64* %ptr
- %size.1 = lshr i64 %size, 3
- %size.2 = shl i64 %size.1, 2
- ret i64 %size.2
-}
-
-define i64 @object-ref(i64* %obj, i64* %index) {
- %ptr = call i64* @points-to(i64* %obj)
- %index.1 = call i64 @raw-number(i64* %index)
- %index.2 = add i64 %index.1, 1
- %ptr.1 = getelementptr i64* %ptr, i64 %index.2
- %ref = load i64* %ptr.1 ;; gcread
- ret i64 %ref
-}
-
-define i64 @object-set(i64* %obj, i64* %index, i64* %value) {
- %ptr = call i64* @points-to(i64* %obj)
- %index.1 = call i64 @raw-number(i64* %index)
- %index.2 = add i64 %index.1, 1
- %ptr.1 = getelementptr i64* %ptr, i64 %index.2
- %val = load i64* %value ;; gcread
- store i64 %val, i64* %ptr.1 ;; gcwrite
- %res = load i64* %obj
- ret i64 %res
-}
-
-define i64 @allocate-string-or-symbol(i64* %size, i64* %symbolp) {
-  %bytes = call i64 @allocate-bytearray(i64 *%size)
-  %res = call i64 @make-string-or-symbol(i64 %bytes, i64* %size, i64* %symbolp)
-  ret i64 %res
-}
-
-define i64 @string-ref(i64* %str, i64* %index) {
- %bytes = call i8* @string-bytes(i64* %str)
- %index.1 = call i64 @raw-number(i64* %index)
- %res = call i64 @bytearray-ref(i8* %bytes, i64 %index.1)
- ret i64 %res
-}
-
-define i64 @string-set(i64* %str, i64* %index, i64* %value) {
- %bytes = call i8* @string-bytes(i64* %str)
- %index.1 = call i64 @raw-number(i64* %index)
- %value.1 = call i64 @raw-number(i64* %value)
- call void @bytearray-set(i8* %bytes, i64 %index.1, i64 %value.1)
- %res = load i64* %str
- ret i64 %res
-}
-
-define i64 @mem-cpy(i64* %src, i64* %dst, i64* %size) {
- %src.1 = call i64* @points-to(i64* %src)
- %src.2 = bitcast i64* %src.1 to i8*
- %dst.1 = call i64* @points-to(i64* %dst)
- %dst.2 = bitcast i64* %dst.1 to i8*
- %size.2 = call i64 @raw-number(i64* %size)
- %size.3 = trunc i64 %size.2 to i32
- call void @llvm.memcpy(i8* %dst.2, i8* %src.2, i32 %size.3, i32 0)
- %res = load i64* %dst
- ret i64 %res
-}
-
-define i64 @apply-procedure(i64* %proc, i64* %callenv) {
- %proc.1 = call i64* @points-to(i64* %proc)
- %ptr.1 = getelementptr i64* %proc.1, i32 1
- %raw-func = load i64* %ptr.1
- %raw-func.1 = inttoptr i64 %raw-func to i64 (i64*)*
- %res = call i64 %raw-func.1(i64* %callenv)
- ret i64 %res
-}
-
-define i64 @number(i64* %x) {
- %res = call i64 @tag-eq(i64* %x, i64 0)
- ret i64 %res
-}
-
-define i64 @vector(i64* %x) {
- %res = call i64 @tag-eq(i64* %x, i64 1)
- ret i64 %res
-}
-
-define i64 @string-or-symbol(i64* %x) {
- %res = call i64 @tag-eq(i64* %x, i64 2);
- ret i64 %res
-}
-
-define i64 @procedure(i64* %x) {
- %res = call i64 @tag-eq(i64* %x, i64 3)
- ret i64 %res
-}
-
-define i64 @null(i64* %x) {
- %x.1 = load i64* %x
- %bool = icmp eq i64 %x.1, 1 ; null vector pointer?
- br i1 %bool, label %eq, label %noteq
-eq:
- ret i64 4 ; number 1
-noteq:
- ret i64 0 ; number 0
-}
-
-define i64 @make-null() {
- ret i64 1
-}
-
-define i64 @make-true() {
- ret i64 4
-}
-
-define i64 @end() {
-  call void(i32)* @exit(i32 0)
-  ret i64 0
-}
-
-define i32 @main(i32 %argc, i8** %argv) {
-  call void @gc_init(i32 2000000)
-
-  %env = alloca i64
-  store i64 0, i64* %env
-  %res = call i64 @startup(i64* %env)
-; Discard result
-; %res.1 = trunc i64 %res to i32
-; ret i32 %res.1
-  ret i32 0
-}
-
-;; Autogenerated code
-")
 
 (define bootstrap
   '(begin 
@@ -1348,7 +1036,7 @@ define i32 @main(i32 %argc, i8** %argv) {
      (provide read-string)
   ))
 
-(define bootstrap-llvm-code-legacy
+(define bootstrap-llvm-code
   '("declare void @db_trace(i8*, i32, ...)"
     "declare i64 @end()"
     "declare void @gc_init(i32)"
@@ -1393,7 +1081,13 @@ define i32 @main(i32 %argc, i8** %argv) {
     "define i32 @main(i32 %argc, i8** %argv) {"
     "  call void @gc_init(i32 2000000)"
     "  %env = alloca i64"
-    "  store i64 0, i64* %env"))
+    "  store i64 0, i64* %env"
+	"  %res = call i64 @startup(i64* %env)"
+	"  ; Discard result"
+	"  ; %res.1 = trunc i64 %res to i32"
+	"  ; ret i32 %res.1"
+	"  ret i32 0"
+	"}"))
 
 (define (compiler exp)
   (init-generators)
@@ -1401,7 +1095,7 @@ define i32 @main(i32 %argc, i8** %argv) {
         (target (make-reg)))
     (let ((res (compile (append bootstrap exp) target '())))
       (map printer llvm-string-list)
-      (display bootstrap-llvm-code)
+      (map printer bootstrap-llvm-code)
       (display "; FUNCTIONS\n\n")
       (map (lambda (function) (map printer function) (newline))
            llvm-function-list)

@@ -1,2 +1,8 @@
 clang -S -emit-llvm file.c
 cat compile.scm|guile -l compile.scm >out
+
+multiprecision libraries
+https://bellard.org/libbf/ (float)
+https://www.ginac.de/CLN/  (compositional)
+https://github.com/libtom  (int/float)
+Boost.Multiprecision

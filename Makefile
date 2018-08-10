@@ -1,4 +1,4 @@
-SCHEME=guile
+SCHEME=racket
 
 all:	test-c
 
@@ -15,11 +15,11 @@ test-c:	test.scm
 all-llvm:	metascheme.bc rt.so
 	lli -load=./rt.so metascheme.bc
 
-metascheme.S:	metascheme.scm
-	${SCHEME} metascheme.scm >metascheme.S
+metascheme.ll:	metascheme.rkt
+	${SCHEME} metascheme.rkt >metascheme.ll
 
-metascheme.bc:	metascheme.S
-	llvm-as -o metascheme.bc metascheme.S
+metascheme.bc:	metascheme.ll
+	llvm-as -o metascheme.bc metascheme.ll
 
 gc.o:	gc.c gc.h llvm_gc_support.h
 	gcc -DVERBOSEX -fPIC -o gc.o -c gc.c
@@ -32,4 +32,4 @@ rt.so:	gc.o db.o
 
 clean:
 	rm -f compile.ccode.c metascheme test.c test-c
-	rm -f metascheme.S metascheme.bc rt.so gc.o db.o
+	rm -f metascheme.ll metascheme.bc rt.so gc.o db.o
