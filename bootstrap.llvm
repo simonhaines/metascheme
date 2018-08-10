@@ -31,15 +31,15 @@ define i64 @allocate-bytearray(i64* %size) {
 }
 
 define i64 @bytearray-ref(i8* %arr, i64 %index) {
-  %ptr = getelementptr i8* %arr, i64 %index
-  %res = load i8* %ptr
+  %ptr = getelementptr i8, i8* %arr, i64 %index
+  %res = load i8, i8* %ptr
   %res2 = zext i8 %res to i64
   %res3 = call i64 @make-number(i64 %res2)
   ret i64 %res3
 }
 
 define void @bytearray-set(i8* %arr, i64 %index, i64 %value) {
- %ptr = getelementptr i8* %arr, i64 %index
+ %ptr = getelementptr i8, i8* %arr, i64 %index
  %value.1 = trunc i64 %value to i8
  store i8 %value.1, i8* %ptr
  ret void
